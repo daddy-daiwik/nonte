@@ -3560,6 +3560,10 @@ void draw_all_subwindows(void)
 	else
 #endif
 		edit_refresh();
+#ifdef ENABLE_BROWSER
+	if (currmenu & MMAIN)
+		explorer_refresh();
+#endif
 	bottombars(currmenu);
 }
 

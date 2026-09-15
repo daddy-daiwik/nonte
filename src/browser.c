@@ -41,6 +41,137 @@ static int gauge = 0;
 static size_t selected = 0;
 		/* The currently selected filename in the list; zero-based. */
 
+static void explorer_free_items(void)
+{
+	free_chararray(explorer_items, explorer_length);
+	explorer_items = NULL;
+	explorer_length = 0;
+	explorer_selected = 0;
+	explorer_offset = 0;
+}
+
+static void explorer_read_directory(void)
+{
+	DIR *dir = opendir(explorer_path);
+	const struct dirent *entry;
+
+	if (dir == NULL) {
+		statusline(ALERT, _("Cannot read workspace directory"));
+		return;
+	}
+
+	explorer_free_items();
+	while ((entry = readdir(dir)) != NULL) {
+		char *item;
+
+		if (strcmp(entry->d_name, ".") == 0)
+			continue;
+		item = nmalloc(strlen(explorer_path) + strlen(entry->d_name) + 1);
+		sprintf(item, "%s%s", explorer_path, entry->d_name);
+		explorer_items = nrealloc(explorer_items,
+						(explorer_length + 1) * sizeof(char *));
+		explorer_items[explorer_length++] = item;
+	}
+	closedir(dir);
+	qsort(explorer_items, explorer_length, sizeof(char *), diralphasort);
+}
+
+void explorer_toggle(void)
+{
+	if (explorer_visible) {
+		explorer_visible = FALSE;
+		refresh_needed = TRUE;
+		return;
+	}
+
+	if (explorer_path == NULL) {
+		explorer_path = nmalloc(PATH_MAX);
+		if (getcwd(explorer_path, PATH_MAX) == NULL)
+			explorer_path = mallocstrcpy(explorer_path, "./");
+		else if (explorer_path[strlen(explorer_path) - 1] != '/')
+			strcat(explorer_path, "/");
+	}
+
+	explorer_read_directory();
+	explorer_visible = TRUE;
+	refresh_needed = TRUE;
+}
+
+bool explorer_handle_input(int input)
+{
+	struct stat state;
+
+	if (!explorer_visible)
+		return FALSE;
+	refresh_needed = TRUE;
+	if (input == KEY_UP || input == KEY_PPAGE) {
+		if (explorer_selected > 0)
+			explorer_selected -= (input == KEY_PPAGE ? 5 : 1);
+		if (explorer_selected >= explorer_length)
+			explorer_selected = 0;
+		return TRUE;
+	}
+	if (input == KEY_DOWN || input == KEY_NPAGE) {
+		explorer_selected += (input == KEY_NPAGE ? 5 : 1);
+		if (explorer_selected >= explorer_length)
+			explorer_selected = explorer_length ? explorer_length - 1 : 0;
+		return TRUE;
+	}
+	if (input != KEY_ENTER && input != '\r' && input != '\n')
+		return FALSE;
+	if (explorer_length == 0 || stat(explorer_items[explorer_selected], &state) < 0)
+		return TRUE;
+
+	if (S_ISDIR(state.st_mode)) {
+		if (strcmp(tail(explorer_items[explorer_selected]), "..") == 0)
+			explorer_path = free_and_assign(explorer_path,
+						strip_last_component(explorer_path));
+		else
+			explorer_path = free_and_assign(explorer_path,
+						copy_of(explorer_items[explorer_selected]));
+		if (explorer_path[strlen(explorer_path) - 1] != '/')
+			strcat(explorer_path, "/");
+		explorer_read_directory();
+	} else if (open_buffer(explorer_items[explorer_selected], TRUE))
+		prepare_for_display();
+	return TRUE;
+}
+
+void explorer_refresh(void)
+{
+	int width = COLS / 3;
+	int rows = editwinrows;
+
+	if (!explorer_visible || explorer_path == NULL || width < 12)
+		return;
+	if (width > 26)
+		width = 26;
+	if (explorer_selected < explorer_offset)
+		explorer_offset = explorer_selected;
+	if (explorer_selected >= explorer_offset + (size_t)rows)
+		explorer_offset = explorer_selected - rows + 1;
+
+	for (int row = 0; row < rows; row++) {
+		int index = row + explorer_offset;
+
+		mvwprintw(midwin, row, 0, "%*s", width, " ");
+		if ((size_t)index < explorer_length) {
+			const char *name = tail(explorer_items[index]);
+			char *shown = display_string(name, 0, width - 2, FALSE, FALSE);
+
+			if ((size_t)index == explorer_selected)
+				wattron(midwin, interface_color_pair[SELECTED_TEXT]);
+			mvwaddnstr(midwin, row, 1, shown, width - 2);
+			if ((size_t)index == explorer_selected)
+				wattroff(midwin, interface_color_pair[SELECTED_TEXT]);
+			free(shown);
+		}
+		mvwaddch(midwin, row, width - 1, ACS_VLINE);
+	}
+	mvwaddnstr(midwin, 0, 1, explorer_path, width - 2);
+	wnoutrefresh(midwin);
+}
+
 /* Fill 'filelist' with the names of the files in the given directory, set
  * 'list_length' to the number of names in that list, set 'gauge' to the
  * width of the widest filename plus ten, and set 'piles' to the number of

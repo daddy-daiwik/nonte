@@ -101,6 +101,14 @@ extern int editwinrows;
 extern int editwincols;
 extern int margin;
 extern int sidebar;
+#ifdef ENABLE_BROWSER
+extern bool explorer_visible;
+extern char *explorer_path;
+extern char **explorer_items;
+extern size_t explorer_length;
+extern size_t explorer_selected;
+extern size_t explorer_offset;
+#endif
 #ifndef NANO_TINY
 extern int *bardata;
 extern ssize_t stripe_column;
@@ -205,8 +213,12 @@ typedef void (*functionptrtype)(void);
 #ifdef ENABLE_BROWSER
 void browser_refresh(void);
 char *browse_in(const char *inpath);
+char *strip_last_component(const char *path);
 void to_first_file(void);
 void to_last_file(void);
+void explorer_toggle(void);
+bool explorer_handle_input(int input);
+void explorer_refresh(void);
 #endif
 
 /* Most functions in chars.c. */

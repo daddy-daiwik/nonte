@@ -1631,6 +1631,10 @@ void process_a_keystroke(void)
 			return;
 	}
 #endif
+#ifdef ENABLE_BROWSER
+	if (explorer_handle_input(input))
+		return;
+#endif
 
 	/* Check for a shortcut in the main list. */
 	shortcut = get_shortcut(input);

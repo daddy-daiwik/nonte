@@ -148,6 +148,14 @@ int margin = 0;
 		/* The amount of space reserved at the left for line numbers. */
 int sidebar = 0;
 		/* Becomes 1 when the indicator "scroll bar" must be shown. */
+#ifdef ENABLE_BROWSER
+bool explorer_visible = FALSE;
+char *explorer_path = NULL;
+char **explorer_items = NULL;
+size_t explorer_length = 0;
+size_t explorer_selected = 0;
+size_t explorer_offset = 0;
+#endif
 #ifndef NANO_TINY
 int *bardata = NULL;
 		/* An array of characters that together depict the scrollbar. */
@@ -1248,6 +1256,9 @@ void shortcut_init(void)
 	add_to_sclist(MMOST|MBROWSER, "Enter", KEY_ENTER, do_enter);
 	add_to_sclist(MMOST, "^I", '\t', do_tab);
 	add_to_sclist(MMOST, "Tab", '\t', do_tab);
+#ifdef ENABLE_BROWSER
+	add_to_sclist(MMAIN, "^B", 0, explorer_toggle);
+#endif
 	add_to_sclist(MMAIN|MBROWSER|MHELP, "^B", 0, do_search_backward);
 	add_to_sclist(MMAIN|MBROWSER|MHELP, "^F", 0, do_search_forward);
 	add_to_sclist(MMAIN, "^S", 0, do_savefile);
