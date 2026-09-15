@@ -3506,6 +3506,10 @@ void edit_refresh(void)
 	place_the_cursor();
 
 	wnoutrefresh(midwin);
+#ifdef ENABLE_BROWSER
+	if (currmenu & MMAIN)
+		explorer_refresh();
+#endif
 
 	refresh_needed = FALSE;
 }
@@ -3560,10 +3564,6 @@ void draw_all_subwindows(void)
 	else
 #endif
 		edit_refresh();
-#ifdef ENABLE_BROWSER
-	if (currmenu & MMAIN)
-		explorer_refresh();
-#endif
 	bottombars(currmenu);
 }
 
