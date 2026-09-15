@@ -1447,6 +1447,8 @@ void shortcut_init(void)
 #ifdef ENABLE_MULTIBUFFER
 	add_to_sclist(MMAIN, "M-,", 0, switch_to_prev_buffer);
 	add_to_sclist(MMAIN, "M-.", 0, switch_to_next_buffer);
+	add_to_sclist(MMAIN, "C-S-Tab", CONTROL_SHIFT_TAB, switch_to_prev_buffer);
+	add_to_sclist(MMAIN, "C-Tab", CONTROL_TAB, switch_to_next_buffer);
 #endif
 	add_to_sclist(MMOST, "M-V", 0, do_verbatim_input);
 #ifndef NANO_TINY

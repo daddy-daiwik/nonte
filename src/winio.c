@@ -852,6 +852,13 @@ int convert_CSI_sequence(const int *seq, size_t length, int *consumed)
 #endif
 			break;
 		case '9': /* Esc [ 9 == Delete on Mach console. */
+			if (length > 3 && seq[1] == ';' && seq[3] == '~') {
+				*consumed = 4;
+				if (seq[2] == '5')
+					return CONTROL_TAB;
+				if (seq[2] == '6')
+					return CONTROL_SHIFT_TAB;
+			}
 			return KEY_DC;
 		case '@': /* Esc [ @ == Insert on Mach console. */
 			return KEY_IC;
@@ -1714,6 +1721,50 @@ void blank_titlebar(void)
 	mvwprintw(topwin, 0, 0, "%*s", COLS, " ");
 }
 
+static void draw_tabbar(void)
+{
+#ifdef ENABLE_MULTIBUFFER
+	openfilestruct *buffer = startfile;
+	int column = 0;
+
+	blank_titlebar();
+	wattron(topwin, interface_color_pair[TITLE_BAR]);
+
+	do {
+		const char *name = buffer->filename[0] ? strrchr(buffer->filename, '/') : NULL;
+		char *caption;
+		int width;
+
+		name = name ? name + 1 : (buffer->filename[0] ? buffer->filename : _("Untitled"));
+		width = breadth(name) + (buffer->modified ? 3 : 2);
+		if (column + width + 2 > COLS)
+			break;
+
+		if (buffer == openfile)
+			wattron(topwin, A_REVERSE | A_BOLD);
+		waddch(topwin, '[');
+		caption = display_string(name, 0, width - (buffer->modified ? 3 : 2), FALSE, FALSE);
+		waddstr(topwin, caption);
+		free(caption);
+		if (buffer->modified)
+			waddstr(topwin, " *");
+		waddch(topwin, ']');
+		if (buffer == openfile)
+			wattroff(topwin, A_REVERSE | A_BOLD);
+		waddch(topwin, ' ');
+		column += width + 1;
+		buffer = buffer->next;
+	} while (buffer != startfile);
+
+	if (column + 2 <= COLS)
+		waddstr(topwin, "+");
+
+	wattroff(topwin, interface_color_pair[TITLE_BAR]);
+#else
+	blank_titlebar();
+#endif
+}
+
 /* Blank all lines of the middle portion of the screen (the edit window). */
 void blank_edit(void)
 {
@@ -2020,6 +2071,13 @@ void titlebar(const char *path)
 	/* If the screen is too small, there is no title bar. */
 	if (topwin == NULL)
 		return;
+#ifdef ENABLE_MULTIBUFFER
+	if (currmenu == MMAIN && path == NULL) {
+		draw_tabbar();
+		wrefresh(topwin);
+		return;
+	}
+#endif
 
 	wattron(topwin, interface_color_pair[TITLE_BAR]);
 
