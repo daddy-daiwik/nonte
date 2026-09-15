@@ -1724,7 +1724,7 @@ void blank_titlebar(void)
 static void draw_tabbar(void)
 {
 #ifdef ENABLE_MULTIBUFFER
-	openfilestruct *buffer = startfile;
+	openfilestruct *buffer = openfile;
 	int column = 0;
 
 	blank_titlebar();
