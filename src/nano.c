@@ -321,6 +321,36 @@ void do_exit(void)
 		statusbar(_("Cancelled"));
 }
 
+void do_quit(void)
+{
+#ifdef ENABLE_MULTIBUFFER
+	openfilestruct *first = openfile;
+
+	do {
+		if (openfile->modified && !ISSET(VIEW_MODE)) {
+			int choice = ask_user(YESORNO, _("Save modified buffer? "));
+
+			if (choice == CANCEL)
+				return;
+			if (choice == YES && write_it_out(TRUE, TRUE) <= 0)
+				return;
+		}
+
+		openfile = openfile->next;
+	} while (openfile != first);
+
+	while (openfile != openfile->next) {
+		switch_to_next_buffer();
+		openfile = openfile->prev;
+		close_buffer();
+		openfile = openfile->next;
+	}
+	close_and_go();
+#else
+	do_exit();
+#endif
+}
+
 /* Save the current buffer under the given name (or "nano.<pid>" when nameless)
  * with suffix ".save".  If needed, the name is further suffixed to be unique. */
 void emergency_save(const char *filename)

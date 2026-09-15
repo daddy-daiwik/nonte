@@ -317,6 +317,8 @@ bool write_region_to_file(const char *name, FILE *stream, writing_type method);
 int write_it_out(bool exiting, bool withprompt);
 void do_writeout(void);
 void do_savefile(void);
+void do_open_in_new_buffer(void);
+void do_new_buffer(void);
 char *expand_leading_tilde(const char *path);
 #if defined(ENABLE_TABCOMP) || defined(ENABLE_BROWSER)
 int diralphasort(const void *va, const void *vb);
@@ -413,6 +415,7 @@ void suggest_ctrlT_ctrlZ(void);
 void finish(void);
 void close_and_go(void);
 void do_exit(void);
+void do_quit(void);
 void die(const char *msg, ...);
 void window_init(void);
 void install_handler_for_Ctrl_C(void);

@@ -1339,6 +1339,31 @@ void do_insertfile(void)
 		insert_a_file_or(FALSE);
 }
 
+void do_open_in_new_buffer(void)
+{
+#ifdef ENABLE_MULTIBUFFER
+	bool was_new_buffer = ISSET(NEW_BUFFER);
+
+	SET(NEW_BUFFER);
+	if (!in_restricted_mode())
+		insert_a_file_or(FALSE);
+	if (!was_new_buffer)
+		UNSET(NEW_BUFFER);
+#else
+	do_insertfile();
+#endif
+}
+
+void do_new_buffer(void)
+{
+#ifdef ENABLE_MULTIBUFFER
+	if (!in_restricted_mode()) {
+		open_buffer("", TRUE);
+		prepare_for_display();
+	}
+#endif
+}
+
 #ifndef NANO_TINY
 /* If the current mode of operation allows it, go prompt for a command. */
 void do_execute(void)
