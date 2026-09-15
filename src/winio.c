@@ -2072,7 +2072,7 @@ void titlebar(const char *path)
 	if (topwin == NULL)
 		return;
 #ifdef ENABLE_MULTIBUFFER
-	if (currmenu == MMAIN && path == NULL) {
+	if ((currmenu & MMAIN) && path == NULL) {
 		draw_tabbar();
 		wrefresh(topwin);
 		return;
