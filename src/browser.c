@@ -123,10 +123,18 @@ bool explorer_handle_input(int input)
 		return TRUE;
 
 	if (S_ISDIR(state.st_mode)) {
-		if (strcmp(tail(explorer_items[explorer_selected]), "..") == 0)
-			explorer_path = free_and_assign(explorer_path,
-						strip_last_component(explorer_path));
-		else
+		if (strcmp(tail(explorer_items[explorer_selected]), "..") == 0) {
+			if (strcmp(explorer_path, "/") != 0) {
+				char *trimmed = copy_of(explorer_path);
+				size_t length = strlen(trimmed);
+
+				while (length > 1 && trimmed[length - 1] == '/')
+					trimmed[--length] = '\0';
+				explorer_path = free_and_assign(explorer_path,
+						strip_last_component(trimmed));
+				free(trimmed);
+			}
+		} else
 			explorer_path = free_and_assign(explorer_path,
 						copy_of(explorer_items[explorer_selected]));
 		if (explorer_path[strlen(explorer_path) - 1] != '/')
