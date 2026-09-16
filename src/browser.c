@@ -140,9 +140,9 @@ bool explorer_handle_input(int input)
 void explorer_refresh(void)
 {
 	int width = COLS / 3;
-	int rows = editwinrows;
+	int rows = editwinrows - 1;
 
-	if (!explorer_visible || explorer_path == NULL || width < 12)
+	if (!explorer_visible || explorer_path == NULL || width < 12 || rows < 1)
 		return;
 	if (width > 26)
 		width = 26;
@@ -151,24 +151,28 @@ void explorer_refresh(void)
 	if (explorer_selected >= explorer_offset + (size_t)rows)
 		explorer_offset = explorer_selected - rows + 1;
 
+	mvwprintw(midwin, 0, 0, "%*s", width, " ");
+	mvwaddnstr(midwin, 0, 1, explorer_path, width - 2);
+	mvwaddch(midwin, 0, width - 1, ACS_VLINE);
+
 	for (int row = 0; row < rows; row++) {
+		int screen_row = row + 1;
 		int index = row + explorer_offset;
 
-		mvwprintw(midwin, row, 0, "%*s", width, " ");
+		mvwprintw(midwin, screen_row, 0, "%*s", width, " ");
 		if ((size_t)index < explorer_length) {
 			const char *name = tail(explorer_items[index]);
 			char *shown = display_string(name, 0, width - 2, FALSE, FALSE);
 
 			if ((size_t)index == explorer_selected)
 				wattron(midwin, interface_color_pair[SELECTED_TEXT]);
-			mvwaddnstr(midwin, row, 1, shown, width - 2);
+			mvwaddnstr(midwin, screen_row, 1, shown, width - 2);
 			if ((size_t)index == explorer_selected)
 				wattroff(midwin, interface_color_pair[SELECTED_TEXT]);
 			free(shown);
 		}
-		mvwaddch(midwin, row, width - 1, ACS_VLINE);
+		mvwaddch(midwin, screen_row, width - 1, ACS_VLINE);
 	}
-	mvwaddnstr(midwin, 0, 1, explorer_path, width - 2);
 	wnoutrefresh(midwin);
 }
 
