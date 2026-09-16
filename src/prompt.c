@@ -815,3 +815,271 @@ int ask_user(bool withall, const char *question)
 
 	return choice;
 }
+
+/* ======================== Command Palette ======================== */
+
+typedef struct {
+	void (*func)(void);
+	char *name;
+	char *shortcut;
+	char *desc;
+} CommandEntry;
+
+static bool palette_casestr(const char *haystack, const char *needle)
+{
+	if (!needle || !*needle)
+		return TRUE;
+	if (!haystack || !*haystack)
+		return FALSE;
+
+	size_t nlen = strlen(needle);
+	size_t hlen = strlen(haystack);
+	if (nlen > hlen)
+		return FALSE;
+
+	for (size_t i = 0; i <= hlen - nlen; i++) {
+		if (strncasecmp(haystack + i, needle, nlen) == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* Display a searchable command palette window (like Ctrl+Shift+P in VS Code)
+ * that lists available commands, their shortcuts, and descriptions. */
+void do_command_palette(void)
+{
+	CommandEntry entries[128];
+	int total_entries = 0;
+
+	/* Collect MMAIN functions from allfuncs. */
+	for (funcstruct *f = allfuncs; f != NULL && total_entries < 120; f = f->next) {
+		if ((f->menus & MMAIN) && f->func != NULL && f->func != do_cancel &&
+				f->func != do_command_palette) {
+			bool duplicate = FALSE;
+			for (int k = 0; k < total_entries; k++) {
+				if (entries[k].func == f->func) {
+					duplicate = TRUE;
+					break;
+				}
+			}
+			if (duplicate)
+				continue;
+
+			const keystruct *sc = first_sc_for(MMAIN, f->func);
+			const char *tag = f->tag ? f->tag : "";
+			const char *phrase = "";
+#ifdef ENABLE_HELP
+			if (f->phrase && f->phrase[0] && strcmp(f->phrase, "x") != 0)
+				phrase = f->phrase;
+#endif
+			/* Fallbacks for clear descriptions */
+			if (!phrase || !*phrase) {
+				if (f->func == do_savefile)
+					phrase = _("Save current file to disk");
+				else if (f->func == do_open_in_new_buffer)
+					phrase = _("Open a file in a new tab");
+				else if (f->func == do_new_buffer)
+					phrase = _("Create a new untitled buffer");
+				else if (f->func == do_exit)
+					phrase = _("Close buffer / Exit editor");
+				else if (f->func == do_quit)
+					phrase = _("Exit nano immediately");
+				else if (f->func == cut_text)
+					phrase = _("Cut current line or selection");
+				else if (f->func == copy_text)
+					phrase = _("Copy current line or selection");
+				else if (f->func == paste_text)
+					phrase = _("Paste text from clipboard");
+				else if (f->func == do_undo)
+					phrase = _("Undo the last editing action");
+				else if (f->func == do_redo)
+					phrase = _("Redo the last undone action");
+#ifdef ENABLE_BROWSER
+				else if (f->func == explorer_toggle)
+					phrase = _("Show or hide the file sidebar");
+				else if (f->func == do_workspace_select)
+					phrase = _("Change explorer workspace directory");
+#endif
+#ifdef ENABLE_MULTIBUFFER
+				else if (f->func == switch_to_next_buffer)
+					phrase = _("Switch to the next tab");
+				else if (f->func == switch_to_prev_buffer)
+					phrase = _("Switch to the previous tab");
+#endif
+				else
+					phrase = tag;
+			}
+
+			entries[total_entries].func = f->func;
+			entries[total_entries].name = copy_of(tag);
+			entries[total_entries].shortcut = copy_of(sc ? sc->keystr : "");
+			entries[total_entries].desc = copy_of(phrase);
+			total_entries++;
+		}
+	}
+
+	int pwidth = (COLS > 76) ? 74 : (COLS - 4);
+	if (pwidth < 28)
+		pwidth = COLS;
+	int pheight = (LINES > 20) ? 15 : (LINES - 4);
+	if (pheight < 6)
+		pheight = LINES;
+	int start_y = (LINES > pheight) ? 1 : 0;
+	int start_x = (COLS > pwidth) ? (COLS - pwidth) / 2 : 0;
+
+	WINDOW *palwin = newwin(pheight, pwidth, start_y, start_x);
+	if (palwin == NULL) {
+		for (int i = 0; i < total_entries; i++) {
+			free(entries[i].name);
+			free(entries[i].shortcut);
+			free(entries[i].desc);
+		}
+		return;
+	}
+
+	keypad(palwin, TRUE);
+	wtimeout(palwin, -1);
+
+	char query[128] = "";
+	int query_len = 0;
+	int selected_idx = 0;
+	int scroll_offset = 0;
+	void (*chosen_func)(void) = NULL;
+
+	while (TRUE) {
+		int matches[128];
+		int match_count = 0;
+
+		for (int i = 0; i < total_entries; i++) {
+			if (query_len == 0 ||
+					palette_casestr(entries[i].name, query) ||
+					palette_casestr(entries[i].shortcut, query) ||
+					palette_casestr(entries[i].desc, query)) {
+				matches[match_count++] = i;
+			}
+		}
+
+		if (selected_idx >= match_count)
+			selected_idx = (match_count > 0) ? match_count - 1 : 0;
+		if (selected_idx < scroll_offset)
+			scroll_offset = selected_idx;
+		int list_rows = pheight - 4;
+		if (list_rows <= 0)
+			list_rows = 1;
+		if (selected_idx >= scroll_offset + list_rows)
+			scroll_offset = selected_idx - list_rows + 1;
+
+		/* Redraw palette window */
+		werase(palwin);
+		box(palwin, 0, 0);
+
+		wattron(palwin, A_BOLD);
+		mvwprintw(palwin, 0, 2, " Command Palette ");
+		mvwprintw(palwin, 1, 2, "> %s", query);
+		wattroff(palwin, A_BOLD);
+
+		/* Input cursor indicator */
+		wattron(palwin, A_REVERSE);
+		waddch(palwin, ' ');
+		wattroff(palwin, A_REVERSE);
+
+		/* Divider line */
+		wmove(palwin, 2, 1);
+		whline(palwin, ACS_HLINE, pwidth - 2);
+
+		/* List items */
+		for (int r = 0; r < list_rows; r++) {
+			int m = scroll_offset + r;
+			int row = 3 + r;
+			if (m >= match_count)
+				break;
+
+			CommandEntry *cmd = &entries[matches[m]];
+			bool is_sel = (m == selected_idx);
+
+			int name_w = 20;
+			int sc_w = 8;
+			int desc_w = pwidth - 4 - name_w - sc_w - 2;
+			if (desc_w < 5)
+				desc_w = 5;
+
+			char name_buf[64], sc_buf[32], desc_buf[160];
+			snprintf(name_buf, sizeof(name_buf), "%-*.*s", name_w, name_w, cmd->name);
+			snprintf(sc_buf, sizeof(sc_buf), "%-*.*s", sc_w, sc_w, cmd->shortcut);
+			snprintf(desc_buf, sizeof(desc_buf), "%-*.*s", desc_w, desc_w, cmd->desc);
+
+			if (is_sel)
+				wattron(palwin, A_REVERSE | A_BOLD);
+
+			mvwprintw(palwin, row, 2, "%s %s %s", name_buf, sc_buf, desc_buf);
+
+			if (is_sel)
+				wattroff(palwin, A_REVERSE | A_BOLD);
+		}
+
+		/* Bottom status */
+		if (match_count > 0)
+			mvwprintw(palwin, pheight - 1, 2, " %i/%i [Enter: Run, Esc: Close] ",
+					selected_idx + 1, match_count);
+		else
+			mvwprintw(palwin, pheight - 1, 2, " No matching commands [Esc: Close] ");
+
+		wrefresh(palwin);
+
+		int ch = wgetch(palwin);
+
+		if (ch == 27 || ch == 3 || ch == 7) { /* Esc, Ctrl+C, Ctrl+G */
+			chosen_func = NULL;
+			break;
+		} else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+			if (match_count > 0)
+				chosen_func = entries[matches[selected_idx]].func;
+			break;
+		} else if (ch == KEY_UP || ch == 16) { /* Up, Ctrl+P */
+			if (selected_idx > 0)
+				selected_idx--;
+		} else if (ch == KEY_DOWN || ch == 14) { /* Down, Ctrl+N */
+			if (selected_idx + 1 < match_count)
+				selected_idx++;
+		} else if (ch == KEY_PPAGE) {
+			selected_idx -= list_rows;
+			if (selected_idx < 0)
+				selected_idx = 0;
+		} else if (ch == KEY_NPAGE) {
+			selected_idx += list_rows;
+			if (selected_idx >= match_count)
+				selected_idx = (match_count > 0) ? match_count - 1 : 0;
+		} else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b' || ch == 8) {
+			if (query_len > 0) {
+				query[--query_len] = '\0';
+				selected_idx = 0;
+				scroll_offset = 0;
+			}
+		} else if (ch == 21) { /* Ctrl+U clears query */
+			query[0] = '\0';
+			query_len = 0;
+			selected_idx = 0;
+			scroll_offset = 0;
+		} else if (ch >= 0x20 && ch <= 0x7E) {
+			if (query_len < (int)sizeof(query) - 2) {
+				query[query_len++] = (char)ch;
+				query[query_len] = '\0';
+				selected_idx = 0;
+				scroll_offset = 0;
+			}
+		}
+	}
+
+	for (int i = 0; i < total_entries; i++) {
+		free(entries[i].name);
+		free(entries[i].shortcut);
+		free(entries[i].desc);
+	}
+
+	delwin(palwin);
+	full_refresh();
+	edit_refresh();
+
+	if (chosen_func)
+		chosen_func();
+}

@@ -1145,6 +1145,26 @@ void shortcut_init(void)
 
 	add_to_funcs(do_savefile, MMAIN,
 			N_("Save"), WHENHELP(savefile_gist), BLANKAFTER);
+	add_to_funcs(do_command_palette, MMAIN,
+			N_("Command Palette"), N_("Open command palette"), TOGETHER);
+#ifdef ENABLE_BROWSER
+	add_to_funcs(explorer_toggle, MMAIN,
+			N_("Toggle Explorer"), N_("Show or hide the file sidebar"), TOGETHER);
+	add_to_funcs(do_workspace_select, MMAIN,
+			N_("Workspace Select"), N_("Change explorer workspace directory"), BLANKAFTER);
+#endif
+	add_to_funcs(do_open_in_new_buffer, MMAIN,
+			N_("Open File"), N_("Open a file in a new tab"), TOGETHER);
+	add_to_funcs(do_new_buffer, MMAIN,
+			N_("New Tab"), N_("Create a new untitled buffer"), TOGETHER);
+	add_to_funcs(do_quit, MMAIN,
+			N_("Quit Editor"), N_("Exit nano immediately"), BLANKAFTER);
+#ifdef ENABLE_MULTIBUFFER
+	add_to_funcs(switch_to_next_buffer, MMAIN,
+			N_("Next Tab"), N_("Switch to the next tab"), TOGETHER);
+	add_to_funcs(switch_to_prev_buffer, MMAIN,
+			N_("Previous Tab"), N_("Switch to the previous tab"), BLANKAFTER);
+#endif
 
 #ifdef ENABLE_MULTIBUFFER
 	/* Include the new-buffer toggle only when it can actually be used. */
@@ -1276,6 +1296,10 @@ void shortcut_init(void)
 	add_to_sclist(MMAIN, "^Z", 0, do_undo);
 	add_to_sclist(MMAIN, "^Y", 0, do_redo);
 #endif
+	add_to_sclist(MMAIN, "C-S-P", CONTROL_SHIFT_P, do_command_palette);
+	add_to_sclist(MMAIN, "^P", 0, do_command_palette);
+	add_to_sclist(MMAIN, "M-P", 0, do_command_palette);
+	add_to_sclist(MMAIN, "F1", KEY_F(1), do_command_palette);
 	if (ISSET(MODERN_BINDINGS)) {
 		add_to_sclist((MMOST|MBROWSER) & ~MFINDINHELP, help_key, 0, do_help);
 		add_to_sclist(MHELP, help_key, 0, do_exit);

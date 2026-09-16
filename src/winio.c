@@ -588,6 +588,15 @@ int convert_SS3_sequence(const int *seq, size_t length, int *consumed)
 /* Translate a sequence that began with "Esc [" to its corresponding key code. */
 int convert_CSI_sequence(const int *seq, size_t length, int *consumed)
 {
+	if (length > 4 && seq[0] == '8' && seq[1] == '0' && seq[2] == ';' && seq[3] == '6' && seq[4] == 'u') {
+		*consumed = 5;
+		return CONTROL_SHIFT_P;
+	}
+	if (length > 5 && seq[0] == '1' && seq[1] == '1' && seq[2] == '2' && seq[3] == ';' && seq[4] == '6' && seq[5] == 'u') {
+		*consumed = 6;
+		return CONTROL_SHIFT_P;
+	}
+
 	if (seq[0] < '9' && length > 1)
 		*consumed = 2;
 
@@ -2251,148 +2260,90 @@ void titlebar(const char *path)
 }
 
 #ifndef NANO_TINY
-/* Draw a bar at the bottom with some minimal state information. */
+/* Draw a bar at the bottom with comprehensive status information. */
 void minibar(void)
 {
-	char *thename = NULL, *number_of_lines = NULL, *ranking = NULL;
-	char *location = nmalloc(44);
-	char *hexadecimal = nmalloc(9);
-	char *successor = NULL;
-	size_t namewidth, placewidth;
-	size_t tallywidth = 0;
-	size_t padding = 2;
-#ifdef ENABLE_UTF8
-	wchar_t widecode;
-#endif
+	char *thename = NULL;
+	char *ws_display = NULL;
+	char leftinfo[160];
+	char rightinfo[160];
+	size_t leftlen, rightlen;
+	size_t count = openfile->filebot->lineno - (openfile->filebot->data[0] == '\0');
+	size_t pct = (count > 0) ? (100 * openfile->current->lineno / count) : 100;
+	const char *lang = (openfile->syntax && openfile->syntax->name) ?
+							openfile->syntax->name : "Plain Text";
+	const char *enc = using_utf8 ? "UTF-8" : "ASCII";
+	const char *eol = (openfile->fmt == DOS_FILE) ? "CRLF" : "LF";
 
-	/* Draw a colored bar over the full width of the screen. */
-	wattron(footwin, interface_color_pair[MINI_INFOBAR]);
-	mvwprintw(footwin, 0, 0, "%*s", COLS, " ");
+	if (pct > 100)
+		pct = 100;
+
+#ifdef ENABLE_BROWSER
+	if (explorer_path && *explorer_path) {
+		char *temp = copy_of(explorer_path);
+		size_t len = strlen(temp);
+		while (len > 1 && temp[len - 1] == '/')
+			temp[--len] = '\0';
+		ws_display = copy_of(tail(temp));
+		free(temp);
+	}
+#endif
 
 	if (openfile->filename[0]) {
 		as_an_at = FALSE;
-		thename = display_string(openfile->filename, 0, COLS, FALSE, FALSE);
+		thename = display_string(tail(openfile->filename), 0, COLS, FALSE, FALSE);
 	} else
-		thename = copy_of(_("(nameless)"));
+		thename = copy_of(_("Untitled"));
 
-	sprintf(location, "%zi,%zi", openfile->current->lineno, xplustabs() + 1);
-	placewidth = strlen(location);
-	namewidth = breadth(thename);
+	/* Format left side: [workspace] filename * */
+	if (ws_display && ws_display[0] && COLS > 60)
+		snprintf(leftinfo, sizeof(leftinfo), " [%s] %s%s", ws_display, thename, openfile->modified ? " *" : "");
+	else
+		snprintf(leftinfo, sizeof(leftinfo), " %s%s", thename, openfile->modified ? " *" : "");
 
-	/* If the file name is relatively long, drop the side spaces. */
-	if (namewidth + 19 > COLS)
-		padding = 0;
+	/* Format right side: Ln X, Col Y (Z%) | UTF-8 | LF | Lang */
+	if (COLS > 85)
+		snprintf(rightinfo, sizeof(rightinfo), "Ln %zi, Col %zi (%zu%%)  |  %s  |  %s  |  %s ",
+				openfile->current->lineno, xplustabs() + 1, pct, enc, eol, lang);
+	else if (COLS > 65)
+		snprintf(rightinfo, sizeof(rightinfo), "Ln %zi, Col %zi  |  %s  |  %s ",
+				openfile->current->lineno, xplustabs() + 1, enc, lang);
+	else if (COLS > 45)
+		snprintf(rightinfo, sizeof(rightinfo), "Ln %zi, Col %zi  |  %s ",
+				openfile->current->lineno, xplustabs() + 1, enc);
+	else
+		snprintf(rightinfo, sizeof(rightinfo), "%zi,%zi ",
+				openfile->current->lineno, xplustabs() + 1);
 
-	/* Display the name of the current file (dottifying it if it doesn't fit),
-	 * plus a star when the file has been modified. */
-	if (COLS > 4) {
-		if (namewidth > COLS - 2) {
-			char *shortname = display_string(thename, namewidth - COLS + 5,
-												COLS - 5, FALSE, FALSE);
-			mvwaddstr(footwin, 0, 0, "...");
-			waddstr(footwin, shortname);
-			free(shortname);
-		} else
-			mvwaddstr(footwin, 0, padding, thename);
+	leftlen = breadth(leftinfo);
+	rightlen = breadth(rightinfo);
 
-		waddstr(footwin, openfile->modified ? " *" : "  ");
+	/* Draw colored bar over full width. */
+	wattron(footwin, interface_color_pair[MINI_INFOBAR]);
+	mvwprintw(footwin, 0, 0, "%*s", COLS, " ");
+
+	/* Draw left portion (truncate if space is tight). */
+	if (leftlen + rightlen >= (size_t)COLS) {
+		size_t max_left = (COLS > (int)rightlen + 3) ? (COLS - rightlen - 3) : 0;
+		if (max_left > 3) {
+			char *clipped = display_string(leftinfo, 0, max_left, FALSE, FALSE);
+			mvwaddstr(footwin, 0, 0, clipped);
+			waddstr(footwin, "..");
+			free(clipped);
+		}
+	} else {
+		mvwaddstr(footwin, 0, 0, leftinfo);
 	}
 
-	/* Right after reading or writing a file, display its number of lines;
-	 * otherwise, when there are multiple buffers, display an [x/n] counter. */
-	if (report_size && COLS > 35) {
-		size_t count = openfile->filebot->lineno - (openfile->filebot->data[0] == '\0');
-
-		number_of_lines = nmalloc(49);
-		if (openfile->fmt == NIX_FILE || openfile->fmt == UNSPECIFIED)
-			sprintf(number_of_lines, P_(" (%zu line)", " (%zu lines)", count), count);
-		else
-			sprintf(number_of_lines, P_(" (%zu line, %s)", " (%zu lines, %s)", count),
-										count, _("DOS"));
-		tallywidth = breadth(number_of_lines);
-		if (namewidth + tallywidth + 11 < COLS)
-			waddstr(footwin, number_of_lines);
-		else
-			tallywidth = 0;
-		report_size = FALSE;
-	}
-#ifdef ENABLE_MULTIBUFFER
-	else if (openfile->next != openfile && COLS > 35) {
-		ranking = nmalloc(24);
-		sprintf(ranking, " [%i/%i]", buffer_number(openfile), buffer_number(startfile->prev));
-		if (namewidth + placewidth + breadth(ranking) + 32 < COLS)
-			waddstr(footwin, ranking);
-	}
-#endif
-
-	/* Display the line/column position of the cursor. */
-	if (ISSET(CONSTANT_SHOW) && namewidth + tallywidth + placewidth + 32 < COLS)
-		mvwaddstr(footwin, 0, COLS - 27 - placewidth, location);
-
-	/* Display the hexadecimal code of the character under the cursor,
-	 * plus the codes of up to two succeeding zero-width characters. */
-	if (ISSET(CONSTANT_SHOW) && namewidth + tallywidth + 28 < COLS) {
-		char *this_position = openfile->current->data + openfile->current_x;
-
-		if (*this_position == '\0')
-			sprintf(hexadecimal, openfile->current->next ?
-								(using_utf8 ? "U+000A" : "  0x0A") : "  ----");
-		else if (*this_position == '\n')
-			sprintf(hexadecimal, "  0x00");
-#ifdef ENABLE_UTF8
-		else if ((unsigned char)*this_position < 0x80 && using_utf8)
-			sprintf(hexadecimal, "U+%04X", (unsigned char)*this_position);
-		else if (using_utf8 && mbtowide(&widecode, this_position) > 0)
-			sprintf(hexadecimal, "U+%04X", (int)widecode);
-#endif
-		else
-			sprintf(hexadecimal, "  0x%02X", (unsigned char)*this_position);
-
-		mvwaddstr(footwin, 0, COLS - 23, hexadecimal);
-
-#ifdef ENABLE_UTF8
-		successor = this_position + char_length(this_position);
-
-		if (*this_position && *successor && is_zerowidth(successor) &&
-								mbtowide(&widecode, successor) > 0) {
-			sprintf(hexadecimal, "|%04X", (int)widecode);
-			waddstr(footwin, hexadecimal);
-
-			successor += char_length(successor);
-
-			if (is_zerowidth(successor) && mbtowide(&widecode, successor) > 0) {
-				sprintf(hexadecimal, "|%04X", (int)widecode);
-				waddstr(footwin, hexadecimal);
-			}
-		} else
-			successor = NULL;
-#endif
-	}
-
-	/* Display the state of three flags, and the state of macro and mark. */
-	if (ISSET(STATEFLAGS) && !successor && namewidth + tallywidth + 14 + 2 * padding < COLS) {
-		wmove(footwin, 0, COLS - 11 - padding);
-		show_states_at(footwin);
-	}
-
-	/* Indicate it when the line has an anchor. */
-	if (openfile->current->has_anchor && namewidth + 7 < COLS)
-		mvwaddstr(footwin, 0, COLS - 5 - padding, using_utf8 ? "\xE2\x80\xA0" : "+");
-
-	/* Display how many percent the current line is into the file. */
-	if (namewidth + 6 < COLS) {
-		sprintf(location, "%3zi%%", 100 * openfile->current->lineno / openfile->filebot->lineno);
-		mvwaddstr(footwin, 0, COLS - 4 - padding, location);
-	}
+	/* Draw right portion. */
+	if (rightlen < (size_t)COLS)
+		mvwaddstr(footwin, 0, COLS - rightlen, rightinfo);
 
 	wattroff(footwin, interface_color_pair[MINI_INFOBAR]);
 	wrefresh(footwin);
 
-	free(number_of_lines);
-	free(hexadecimal);
-	free(location);
+	free(ws_display);
 	free(thename);
-	free(ranking);
 }
 #endif /* NANO_TINY */
 

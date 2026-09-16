@@ -215,6 +215,7 @@
 #define SHIFT_TAB       0x45F
 #define CONTROL_TAB     0x460
 #define CONTROL_SHIFT_TAB  0x461
+#define CONTROL_SHIFT_P    0x462
 
 #define FOCUS_IN   0x491
 #define FOCUS_OUT  0x499

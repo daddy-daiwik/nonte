@@ -1912,6 +1912,9 @@ int main(int argc, char **argv)
 #ifdef ENABLE_MOUSE
 	SET(USE_MOUSE);
 #endif
+#ifdef ENABLE_LINENUMBERS
+	SET(LINE_NUMBERS);
+#endif
 
 	/* If the executable's name starts with 'r', activate restricted mode. */
 	if (*(tail(argv[0])) == 'r')
@@ -2732,7 +2735,7 @@ int main(int argc, char **argv)
 			refresh_needed = TRUE;
 		}
 
-		if (ISSET(MINIBAR) && !ISSET(ZERO) && LINES > 1 && lastmessage < REMARK)
+		if (!ISSET(ZERO) && LINES > 1 && lastmessage < REMARK)
 			minibar();
 		else
 #endif

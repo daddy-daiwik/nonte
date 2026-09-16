@@ -79,3 +79,6 @@ core
 /m4/.gitignore
 /m4/gnulib-cache.m4
 /snippet/
+test.c
+test.txt
+test2.txt
