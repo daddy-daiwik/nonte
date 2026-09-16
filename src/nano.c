@@ -461,6 +461,8 @@ void window_init(void)
 
 	/* When not disabled, turn escape-sequence translation on. */
 	if (!ISSET(RAW_SEQUENCES)) {
+		if (topwin)
+			keypad(topwin, TRUE);
 		keypad(midwin, TRUE);
 		keypad(footwin, TRUE);
 	}
@@ -1085,7 +1087,7 @@ void regenerate_screen(void)
 	sidebar = (ISSET(INDICATOR) && LINES > 5 && COLS > 9) ? 1 : 0;
 	bardata = nrealloc(bardata, LINES * sizeof(int));
 
-	editwincols = COLS - margin - sidebar;
+	editwincols = COLS - margin - sidebar - explorer_cols;
 
 	/* Put the terminal in the desired state again, and
 	 * recreate the subwindows with their (new) sizes. */
@@ -1297,7 +1299,7 @@ void confirm_margin(void)
 		bool keep_focus = (margin > 0) && focusing;
 
 		margin = needed_margin;
-		editwincols = COLS - margin - sidebar;
+		editwincols = COLS - margin - sidebar - explorer_cols;
 
 #ifndef NANO_TINY
 		/* Ensure a proper starting column for the first screen row. */
@@ -1907,6 +1909,9 @@ int main(int argc, char **argv)
 
 	/* Set a sensible default, different from what Pico does. */
 	SET(NO_WRAP);
+#ifdef ENABLE_MOUSE
+	SET(USE_MOUSE);
+#endif
 
 	/* If the executable's name starts with 'r', activate restricted mode. */
 	if (*(tail(argv[0])) == 'r')

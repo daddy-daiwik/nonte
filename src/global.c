@@ -155,6 +155,8 @@ char **explorer_items = NULL;
 size_t explorer_length = 0;
 size_t explorer_selected = 0;
 size_t explorer_offset = 0;
+int explorer_cols = 0;
+		/* The column width of the visible explorer sidebar; 0 when hidden. */
 #endif
 #ifndef NANO_TINY
 int *bardata = NULL;

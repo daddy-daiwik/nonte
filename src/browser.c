@@ -80,6 +80,8 @@ void explorer_toggle(void)
 {
 	if (explorer_visible) {
 		explorer_visible = FALSE;
+		explorer_cols = 0;
+		editwincols = COLS - margin - sidebar;
 		refresh_needed = TRUE;
 		return;
 	}
@@ -94,6 +96,18 @@ void explorer_toggle(void)
 
 	explorer_read_directory();
 	explorer_visible = TRUE;
+	/* Compute the sidebar width immediately so the first edit_refresh()
+	 * uses the correct tmargin and editwincols — prevents overlap and
+	 * the invisible-cursor bug. */
+	{
+		int width = COLS / 3;
+		if (width > 26)
+			width = 26;
+		if (width >= 12) {
+			explorer_cols = width;
+			editwincols = COLS - margin - sidebar - explorer_cols;
+		}
+	}
 	refresh_needed = TRUE;
 }
 
@@ -132,6 +146,15 @@ void do_workspace_select(void)
 	explorer_path = free_and_assign(explorer_path, newpath);
 	explorer_read_directory();
 	explorer_visible = TRUE;
+	{
+		int width = COLS / 3;
+		if (width > 26)
+			width = 26;
+		if (width >= 12) {
+			explorer_cols = width;
+			editwincols = COLS - margin - sidebar - explorer_cols;
+		}
+	}
 	refresh_needed = TRUE;
 	statusline(HUSH, _("Workspace: %s"), explorer_path);
 }
@@ -189,10 +212,22 @@ void explorer_refresh(void)
 	int width = COLS / 3;
 	int rows = editwinrows - 1;
 
-	if (!explorer_visible || explorer_path == NULL || width < 12 || rows < 1)
+	if (!explorer_visible || explorer_path == NULL || width < 12 || rows < 1) {
+		if (explorer_cols != 0) {
+			explorer_cols = 0;
+			editwincols = COLS - margin - sidebar;
+		}
 		return;
+	}
 	if (width > 26)
 		width = 26;
+
+	/* Update the column reservation whenever the sidebar width changes. */
+	if (explorer_cols != width) {
+		explorer_cols = width;
+		editwincols = COLS - margin - sidebar - explorer_cols;
+	}
+
 	if (explorer_selected < explorer_offset)
 		explorer_offset = explorer_selected;
 	if (explorer_selected >= explorer_offset + (size_t)rows)

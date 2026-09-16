@@ -108,6 +108,7 @@ extern char **explorer_items;
 extern size_t explorer_length;
 extern size_t explorer_selected;
 extern size_t explorer_offset;
+extern int explorer_cols;
 #endif
 #ifndef NANO_TINY
 extern int *bardata;
@@ -304,6 +305,7 @@ void prepare_for_display(void);
 void mention_name_and_linecount(void);
 void switch_to_prev_buffer(void);
 void switch_to_next_buffer(void);
+void redecorate_after_switch(void);
 void close_buffer(void);
 #endif
 void read_file(FILE *f, int fd, const char *filename, bool undoable);
