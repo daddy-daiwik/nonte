@@ -1258,6 +1258,7 @@ void shortcut_init(void)
 	add_to_sclist(MMOST, "Tab", '\t', do_tab);
 #ifdef ENABLE_BROWSER
 	add_to_sclist(MMAIN, "^B", 0, explorer_toggle);
+	add_to_sclist(MMAIN, "M-K", 0, do_workspace_select);
 #endif
 	add_to_sclist(MMAIN|MBROWSER|MHELP, "^B", 0, do_search_backward);
 	add_to_sclist(MMAIN|MBROWSER|MHELP, "^F", 0, do_search_forward);

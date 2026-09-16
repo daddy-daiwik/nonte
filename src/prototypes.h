@@ -217,6 +217,7 @@ char *strip_last_component(const char *path);
 void to_first_file(void);
 void to_last_file(void);
 void explorer_toggle(void);
+void do_workspace_select(void);
 bool explorer_handle_input(int input);
 void explorer_refresh(void);
 #endif

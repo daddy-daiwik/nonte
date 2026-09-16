@@ -97,6 +97,45 @@ void explorer_toggle(void)
 	refresh_needed = TRUE;
 }
 
+/* Prompt the user for a directory and set it as the explorer workspace root. */
+void do_workspace_select(void)
+{
+	char *newpath;
+
+	if (do_prompt(MGOTODIR, (explorer_path ? explorer_path : "./"),
+				NULL, edit_refresh, _("Workspace directory")) < 0) {
+		statusbar(_("Cancelled"));
+		return;
+	}
+
+	newpath = expand_leading_tilde(answer);
+
+	/* Ensure trailing slash. */
+	if (newpath[strlen(newpath) - 1] != '/') {
+		char *slashed = nmalloc(strlen(newpath) + 2);
+		sprintf(slashed, "%s/", newpath);
+		free(newpath);
+		newpath = slashed;
+	}
+
+	/* Validate: must be a readable directory. */
+	{
+		DIR *test = opendir(newpath);
+		if (test == NULL) {
+			statusline(ALERT, _("Cannot open directory: %s"), newpath);
+			free(newpath);
+			return;
+		}
+		closedir(test);
+	}
+
+	explorer_path = free_and_assign(explorer_path, newpath);
+	explorer_read_directory();
+	explorer_visible = TRUE;
+	refresh_needed = TRUE;
+	statusline(HUSH, _("Workspace: %s"), explorer_path);
+}
+
 bool explorer_handle_input(int input)
 {
 	struct stat state;
