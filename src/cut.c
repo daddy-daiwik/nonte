@@ -156,6 +156,22 @@ void do_backspace(void)
 	}
 #endif
 	if (openfile->current_x > 0) {
+		if (openfile->current->data[openfile->current_x] != '\0') {
+			char before = openfile->current->data[openfile->current_x - 1];
+			char after = openfile->current->data[openfile->current_x];
+			if ((before == '(' && after == ')') ||
+				(before == '[' && after == ']') ||
+				(before == '{' && after == '}') ||
+				(before == '"' && after == '"') ||
+				(before == '\'' && after == '\'') ||
+				(before == '`' && after == '`')) {
+				memmove(openfile->current->data + openfile->current_x,
+						openfile->current->data + openfile->current_x + 1,
+						strlen(openfile->current->data) - openfile->current_x);
+				openfile->totsize--;
+				set_modified();
+			}
+		}
 		openfile->current_x = step_left(openfile->current->data, openfile->current_x);
 		expunge(BACK);
 	} else if (openfile->current != openfile->filetop) {

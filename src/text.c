@@ -370,12 +370,24 @@ void do_comment(void)
 	bool empty, all_empty = TRUE;
 
 #ifdef ENABLE_COLOR
-	if (openfile->syntax)
+	if (openfile->syntax && openfile->syntax->comment && *openfile->syntax->comment != '\0')
 		comment_seq = openfile->syntax->comment;
-
-	if (*comment_seq == '\0') {
-		statusline(AHEM, _("Commenting is not supported for this file type"));
-		return;
+	else {
+		const char *ext = strrchr(openfile->filename, '.');
+		if (ext) {
+			if (strcasecmp(ext, ".py") == 0 || strcasecmp(ext, ".sh") == 0 ||
+				strcasecmp(ext, ".bash") == 0 || strcasecmp(ext, ".rb") == 0 ||
+				strcasecmp(ext, ".pl") == 0 || strcasecmp(ext, ".pm") == 0 ||
+				strcasecmp(ext, ".yml") == 0 || strcasecmp(ext, ".yaml") == 0 ||
+				strcasecmp(ext, ".toml") == 0 || strcasecmp(ext, ".conf") == 0 ||
+				strcasecmp(ext, ".r") == 0 || strcasecmp(ext, ".awk") == 0)
+				comment_seq = "#";
+			else if (strcasecmp(ext, ".lua") == 0 || strcasecmp(ext, ".sql") == 0)
+				comment_seq = "--";
+			else
+				comment_seq = "//";
+		} else
+			comment_seq = "//";
 	}
 #endif
 
@@ -3508,4 +3520,119 @@ void update_autocomplete(void)
 	} else {
 		dismiss_autocomplete();
 	}
+}
+
+/* Feature 2: Move current line or selected block up (Alt+Up). */
+void do_move_line_up(void)
+{
+	linestruct *top, *bot, *above, *before_above, *after_bot;
+
+	if (ISSET(VIEW_MODE)) {
+		print_view_warning();
+		return;
+	}
+
+	get_range(&top, &bot);
+	above = top->prev;
+
+	if (above == NULL)
+		return;
+
+	before_above = above->prev;
+	after_bot = bot->next;
+
+	if (before_above != NULL)
+		before_above->next = top;
+	else
+		openfile->filetop = top;
+	top->prev = before_above;
+
+	bot->next = above;
+	above->prev = bot;
+
+	above->next = after_bot;
+	if (after_bot != NULL)
+		after_bot->prev = above;
+	else
+		openfile->filebot = above;
+
+	renumber_from(top);
+	set_modified();
+	refresh_needed = TRUE;
+}
+
+/* Feature 2: Move current line or selected block down (Alt+Down). */
+void do_move_line_down(void)
+{
+	linestruct *top, *bot, *below, *before_top, *after_below;
+
+	if (ISSET(VIEW_MODE)) {
+		print_view_warning();
+		return;
+	}
+
+	get_range(&top, &bot);
+	below = bot->next;
+
+	if (below == NULL)
+		return;
+	if (below == openfile->filebot && below->data[0] == '\0' && !ISSET(NO_NEWLINES))
+		return;
+
+	before_top = top->prev;
+	after_below = below->next;
+
+	if (before_top != NULL)
+		before_top->next = below;
+	else
+		openfile->filetop = below;
+	below->prev = before_top;
+
+	below->next = top;
+	top->prev = below;
+
+	bot->next = after_below;
+	if (after_below != NULL)
+		after_below->prev = bot;
+	else
+		openfile->filebot = bot;
+
+	renumber_from(below);
+	set_modified();
+	refresh_needed = TRUE;
+}
+
+/* Feature 3: Duplicate current line or selection (Shift+Alt+Down / Ctrl+Shift+D). */
+void do_duplicate_line(void)
+{
+	linestruct *top, *bot, *curr, *after_bot, *insert_pt;
+
+	if (ISSET(VIEW_MODE)) {
+		print_view_warning();
+		return;
+	}
+
+	get_range(&top, &bot);
+	after_bot = bot->next;
+	insert_pt = bot;
+
+	for (curr = top; curr != bot->next; curr = curr->next) {
+		linestruct *clone = make_new_node(insert_pt);
+		clone->data = copy_of(curr->data);
+		insert_pt->next = clone;
+		insert_pt = clone;
+	}
+
+	insert_pt->next = after_bot;
+	if (after_bot != NULL)
+		after_bot->prev = insert_pt;
+	else
+		openfile->filebot = insert_pt;
+
+	if (!openfile->mark)
+		openfile->current = bot->next;
+
+	renumber_from(bot);
+	set_modified();
+	refresh_needed = TRUE;
 }

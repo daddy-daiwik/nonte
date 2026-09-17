@@ -1758,6 +1758,19 @@ bool write_file(const char *name, FILE *thefile, writing_type method, bool annot
 	bool normal = (method != SPECIAL);
 		/* TRUE when it's not a temporary file nor an emergency file. */
 
+	/* Feature 10: Auto-trim trailing whitespace on save */
+	if (normal && openfile) {
+		for (linestruct *curline = openfile->filetop; curline != NULL; curline = curline->next) {
+			size_t len = strlen(curline->data);
+			while (len > 0 && (curline->data[len - 1] == ' ' || curline->data[len - 1] == '\t')) {
+				curline->data[len - 1] = '\0';
+				len--;
+			}
+		}
+		if (openfile->current && openfile->current_x > strlen(openfile->current->data))
+			openfile->current_x = strlen(openfile->current->data);
+	}
+
 #ifdef ENABLE_OPERATINGDIR
 	/* If we're writing a temporary file, we're probably going outside
 	 * the operating directory, so skip the operating directory test. */
@@ -2009,6 +2022,8 @@ bool write_file(const char *name, FILE *thefile, writing_type method, bool annot
 
 	free(tempname);
 	free(realname);
+
+	git_gutter_update();
 
 	return TRUE;
 }
@@ -2653,3 +2668,87 @@ char *input_tab(char *morsel, size_t *place, void (*refresh_func)(void), bool *l
 	return morsel;
 }
 #endif /* ENABLE_TABCOMP */
+
+static const char *about_art_fallback =
+"    ████████████████████████████████  \n"
+"    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀██████▀▀▀▀▀▀    NONTE\n"
+"                        ██████          ────────────────────────────────────────\n"
+"          ▄▄██████▄▄    ██████          [>] Version    : 0.1.0-dev\n"
+"        ▄████████████▄  ██████          [*] Base       : GNU nano\n"
+"      ▄████████████████▄██████          [=] License    : GPL v3+\n"
+"     ▄██████▀    ▀████████████          </> Language   : C\n"
+"     ██████        ███████████          ────────────────────────────────────────\n"
+"     ██████   ▄██▄  ██████████          [*] Features   : Tabs | Explorer | Palette\n"
+"     ▀██████▄▄████   █████████                           Autocomplete | Soft Mark\n"
+"       ▀████████▀    █████████                           Split View | Git Gutter\n"
+"          ▀▀▀▀▀      █████████          ────────────────────────────────────────\n"
+"                     █████████          [^] Shortcuts  : ^P (Quick Open) | ^D (Next)\n"
+"                     █████████                           C-S-P (Palette) | C-S-F (Grep)\n"
+"                   ▄██████████▄                          Alt+Up/Down | C-\\ (Split)\n";
+
+/* Display the About Nonte page in current buffer (if empty & unmodified) or new tab. */
+void do_about(void)
+{
+	FILE *f = fopen("ABOUT.txt", "r");
+	char buf[1024];
+	bool is_empty = (openfile->filetop == openfile->filebot &&
+					openfile->filetop->data[0] == '\0' && !openfile->modified);
+
+	if (!is_empty)
+		make_new_buffer();
+
+	free_lines(openfile->filetop);
+	openfile->filetop = make_new_node(NULL);
+	openfile->filetop->data = copy_of("");
+	openfile->filebot = openfile->filetop;
+	openfile->current = openfile->filetop;
+
+	linestruct *curr = openfile->filetop;
+	bool first = TRUE;
+
+	if (f != NULL) {
+		while (fgets(buf, sizeof(buf), f)) {
+			size_t l = strlen(buf);
+			while (l > 0 && (buf[l - 1] == '\r' || buf[l - 1] == '\n'))
+				buf[--l] = '\0';
+			if (first) {
+				curr->data = mallocstrcpy(curr->data, buf);
+				first = FALSE;
+			} else {
+				curr->next = make_new_node(curr);
+				curr = curr->next;
+				curr->data = copy_of(buf);
+			}
+		}
+		fclose(f);
+	} else {
+		char *copy = copy_of(about_art_fallback);
+		char *line = strtok(copy, "\n");
+		while (line != NULL) {
+			if (first) {
+				curr->data = mallocstrcpy(curr->data, line);
+				first = FALSE;
+			} else {
+				curr->next = make_new_node(curr);
+				curr = curr->next;
+				curr->data = copy_of(line);
+			}
+			line = strtok(NULL, "\n");
+		}
+		free(copy);
+	}
+
+	openfile->filebot = curr;
+	openfile->current = openfile->filetop;
+	openfile->edittop = openfile->filetop;
+	openfile->current_x = 0;
+	openfile->placewewant = 0;
+	openfile->cursor_row = 0;
+	openfile->filename = mallocstrcpy(openfile->filename, "ABOUT.txt");
+	openfile->modified = FALSE;
+
+	renumber_from(openfile->filetop);
+	prepare_for_display();
+	statusline(HUSH, _("Welcome to Nonte 0.1.0-dev!"));
+	refresh_needed = TRUE;
+}

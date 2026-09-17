@@ -310,6 +310,7 @@ void paste_text(void);
 
 /* Most functions in files.c. */
 void make_new_buffer(void);
+void do_about(void);
 #ifndef NANO_TINY
 bool delete_lockfile(const char *lockfilename);
 #endif
@@ -488,6 +489,8 @@ int do_prompt(int menu, const char *provided, linestruct **history_list,
 		void (*refresh_func)(void), const char *msg, ...);
 int ask_user(bool withall, const char *question);
 void do_command_palette(void);
+void do_quick_open(void);
+void do_find_in_files(void);
 
 /* Most functions in rcfile.c. */
 #if defined(ENABLE_NANORC) || defined(ENABLE_HISTORIES)
@@ -514,6 +517,7 @@ void do_search_forward(void);
 void do_search_backward(void);
 void do_findprevious(void);
 void do_findnext(void);
+void do_next_occurrence(void);
 void not_found_msg(const char *str);
 void go_looking(void);
 ssize_t do_replace_loop(const char *needle, bool whole_word_only,
@@ -536,6 +540,9 @@ void to_next_anchor(void);
 /* Most functions in text.c. */
 #ifndef NANO_TINY
 void do_mark(void);
+void do_move_line_up(void);
+void do_move_line_down(void);
+void do_duplicate_line(void);
 #endif
 void do_tab(void);
 #ifndef NANO_TINY
@@ -693,6 +700,11 @@ void spotlight_softwrapped(size_t from_col, size_t to_col);
 #ifdef ENABLE_EXTRA
 void do_credits(void);
 #endif
+extern bool split_view_active;
+void toggle_split_view(void);
+void git_gutter_update(void);
+char git_gutter_status(ssize_t lineno);
+void find_bracket_match(linestruct *line, size_t x, linestruct **out_line, size_t *out_x);
 
 /* These are just name definitions. */
 void case_sens_void(void);

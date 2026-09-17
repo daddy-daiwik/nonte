@@ -1157,6 +1157,22 @@ void shortcut_init(void)
 			N_("Save"), WHENHELP(savefile_gist), BLANKAFTER);
 	add_to_funcs(do_command_palette, MMAIN,
 			N_("Command Palette"), N_("Open command palette"), TOGETHER);
+	add_to_funcs(do_about, MMAIN,
+			N_("About Nonte"), N_("Show Nonte about page with artwork"), TOGETHER);
+	add_to_funcs(do_quick_open, MMAIN,
+			N_("Quick Open"), N_("Quick open file by name"), TOGETHER);
+	add_to_funcs(do_find_in_files, MMAIN,
+			N_("Find in Files"), N_("Search across all files in workspace"), TOGETHER);
+	add_to_funcs(do_move_line_up, MMAIN,
+			N_("Move Line Up"), N_("Move current line or selection up"), TOGETHER);
+	add_to_funcs(do_move_line_down, MMAIN,
+			N_("Move Line Down"), N_("Move current line or selection down"), TOGETHER);
+	add_to_funcs(do_duplicate_line, MMAIN,
+			N_("Duplicate Line"), N_("Duplicate current line or selection"), TOGETHER);
+	add_to_funcs(do_next_occurrence, MMAIN,
+			N_("Next Occurrence"), N_("Select word or jump to next occurrence"), TOGETHER);
+	add_to_funcs(toggle_split_view, MMAIN,
+			N_("Toggle Split View"), N_("Toggle side-by-side split view"), TOGETHER);
 #ifdef ENABLE_BROWSER
 	add_to_funcs(explorer_toggle, MMAIN,
 			N_("Toggle Explorer"), N_("Show or hide the file sidebar"), TOGETHER);
@@ -1307,9 +1323,18 @@ void shortcut_init(void)
 	add_to_sclist(MMAIN, "^Y", 0, do_redo);
 #endif
 	add_to_sclist(MMAIN, "C-S-P", CONTROL_SHIFT_P, do_command_palette);
-	add_to_sclist(MMAIN, "^P", 0, do_command_palette);
 	add_to_sclist(MMAIN, "M-P", 0, do_command_palette);
 	add_to_sclist(MMAIN, "F1", KEY_F(1), do_command_palette);
+	add_to_sclist(MMAIN, "^P", 0, do_quick_open);
+	add_to_sclist(MMAIN, "C-S-F", CONTROL_SHIFT_F, do_find_in_files);
+	add_to_sclist(MMAIN, "M-F", 0, do_find_in_files);
+	add_to_sclist(MMAIN, "^D", 0x04, do_next_occurrence);
+	add_to_sclist(MMAIN, "C-Backslash", CONTROL_BACKSLASH, toggle_split_view);
+	add_to_sclist(MMAIN, "^\\", 0x1C, toggle_split_view);
+	add_to_sclist(MMAIN, "M-\\", 0, toggle_split_view);
+	add_to_sclist(MMAIN, "^_", 0x1F, do_comment);
+	add_to_sclist(MMAIN, "^/", 0x1F, do_comment);
+	add_to_sclist(MMAIN, "M-/", 0, do_comment);
 	if (ISSET(MODERN_BINDINGS)) {
 		add_to_sclist((MMOST|MBROWSER) & ~MFINDINHELP, help_key, 0, do_help);
 		add_to_sclist(MHELP, help_key, 0, do_exit);
@@ -1477,14 +1502,20 @@ void shortcut_init(void)
 #ifndef NANO_TINY
 #ifdef ENABLE_UTF8
 	if (using_utf8) {
-		add_to_sclist(MMAIN|MHELP, "M-\xE2\x96\xb4", ALT_UP, do_scroll_up);
-		add_to_sclist(MMAIN|MHELP, "M-\xE2\x96\xbe", ALT_DOWN, do_scroll_down);
+		add_to_sclist(MMAIN, "M-\xE2\x96\xb4", ALT_UP, do_move_line_up);
+		add_to_sclist(MMAIN, "M-\xE2\x96\xbe", ALT_DOWN, do_move_line_down);
+		add_to_sclist(MHELP, "M-\xE2\x96\xb4", ALT_UP, do_scroll_up);
+		add_to_sclist(MHELP, "M-\xE2\x96\xbe", ALT_DOWN, do_scroll_down);
 	} else
 #endif
 	{
-		add_to_sclist(MMAIN|MHELP, "M-Up", ALT_UP, do_scroll_up);
-		add_to_sclist(MMAIN|MHELP, "M-Down", ALT_DOWN, do_scroll_down);
+		add_to_sclist(MMAIN, "M-Up", ALT_UP, do_move_line_up);
+		add_to_sclist(MMAIN, "M-Down", ALT_DOWN, do_move_line_down);
+		add_to_sclist(MHELP, "M-Up", ALT_UP, do_scroll_up);
+		add_to_sclist(MHELP, "M-Down", ALT_DOWN, do_scroll_down);
 	}
+	add_to_sclist(MMAIN, "Sh-M-Down", SHIFT_ALT_DOWN, do_duplicate_line);
+	add_to_sclist(MMAIN, "C-S-D", CONTROL_SHIFT_D, do_duplicate_line);
 #endif
 #if !defined(NANO_TINY) || defined(ENABLE_HELP)
 	add_to_sclist(MMAIN|MHELP, "M--", 0, do_scroll_up);

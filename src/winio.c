@@ -31,11 +31,7 @@
 #include <wchar.h>
 #endif
 
-#ifdef REVISION
-#define BRANDING  REVISION
-#else
-#define BRANDING  PACKAGE_STRING
-#endif
+#define BRANDING  "Nonte 0.1.0-dev"
 
 /* When having an older ncurses, then most likely libvte is older too. */
 #if defined(NCURSES_VERSION_PATCH) && (NCURSES_VERSION_PATCH < 20200212)
@@ -595,6 +591,30 @@ int convert_CSI_sequence(const int *seq, size_t length, int *consumed)
 	if (length > 5 && seq[0] == '1' && seq[1] == '1' && seq[2] == '2' && seq[3] == ';' && seq[4] == '6' && seq[5] == 'u') {
 		*consumed = 6;
 		return CONTROL_SHIFT_P;
+	}
+	if (length > 4 && seq[0] == '6' && seq[1] == '8' && seq[2] == ';' && seq[3] == '6' && seq[4] == 'u') {
+		*consumed = 5;
+		return CONTROL_SHIFT_D;
+	}
+	if (length > 5 && seq[0] == '1' && seq[1] == '0' && seq[2] == '0' && seq[3] == ';' && seq[4] == '6' && seq[5] == 'u') {
+		*consumed = 6;
+		return CONTROL_SHIFT_D;
+	}
+	if (length > 4 && seq[0] == '7' && seq[1] == '0' && seq[2] == ';' && seq[3] == '6' && seq[4] == 'u') {
+		*consumed = 5;
+		return CONTROL_SHIFT_F;
+	}
+	if (length > 5 && seq[0] == '1' && seq[1] == '0' && seq[2] == '2' && seq[3] == ';' && seq[4] == '6' && seq[5] == 'u') {
+		*consumed = 6;
+		return CONTROL_SHIFT_F;
+	}
+	if (length > 4 && seq[0] == '9' && seq[1] == '2' && seq[2] == ';' && seq[3] == '5' && seq[4] == 'u') {
+		*consumed = 5;
+		return CONTROL_BACKSLASH;
+	}
+	if (length > 4 && seq[0] == '4' && seq[1] == '7' && seq[2] == ';' && (seq[3] == '5' || seq[3] == '6') && seq[4] == 'u') {
+		*consumed = 5;
+		return 0x1F;
 	}
 
 	if (seq[0] < '9' && length > 1)
@@ -2629,9 +2649,22 @@ void draw_row(int row, const char *converted, linestruct *line, size_t from_col)
 #ifndef NANO_TINY
 		if (line->has_anchor && (from_col == 0 || !ISSET(SOFTWRAP)))
 			wprintw(midwin, using_utf8 ? "\xE2\x80\xA0" : "+");
-		else
+		else {
+			char gst = git_gutter_status(line->lineno);
+			if (gst == '+') {
+				wattron(midwin, interface_color_pair[GIT_ADDED]);
+				wprintw(midwin, "+");
+				wattroff(midwin, interface_color_pair[GIT_ADDED]);
+			} else if (gst == '~') {
+				wattron(midwin, interface_color_pair[GIT_MODIFIED]);
+				wprintw(midwin, "~");
+				wattroff(midwin, interface_color_pair[GIT_MODIFIED]);
+			} else
+				wprintw(midwin, " ");
+		}
+#else
+		wprintw(midwin, " ");
 #endif
-			wprintw(midwin, " ");
 	}
 #endif /* ENABLE_LINENUMBERS */
 
@@ -2884,6 +2917,25 @@ void draw_row(int row, const char *converted, linestruct *line, size_t from_col)
 		}
 	}
 #endif /* !NANO_TINY */
+
+	/* Feature 4: Highlight matching bracket pair */
+	if (openfile->current && openfile->current->data) {
+		linestruct *b_line = NULL;
+		size_t b_x = 0;
+		find_bracket_match(openfile->current, openfile->current_x, &b_line, &b_x);
+		if (b_line != NULL) {
+			if (line == b_line) {
+				size_t scol = wideness(line->data, b_x);
+				if (scol >= from_col && scol < from_col + editwincols)
+					mvwchgat(midwin, row, tmargin + scol - from_col, 1, A_STANDOUT | A_BOLD, 0, NULL);
+			}
+			if (line == openfile->current) {
+				size_t ccol = wideness(line->data, openfile->current_x);
+				if (ccol >= from_col && ccol < from_col + editwincols)
+					mvwchgat(midwin, row, tmargin + ccol - from_col, 1, A_STANDOUT | A_BOLD, 0, NULL);
+			}
+		}
+	}
 }
 
 /* Redraw the given line so that the character at the given index is visible
@@ -3504,6 +3556,35 @@ void edit_refresh(void)
 		row++;
 	}
 
+	/* Feature 7: Split View rendering */
+	if (split_view_active) {
+		int split_x = margin + explorer_cols + editwincols;
+		openfilestruct *other = (openfile->next != openfile) ? openfile->next : openfile;
+		linestruct *other_line = other->filetop;
+		int r = 0;
+		for (r = 0; r < editwinrows; r++) {
+			mvwaddch(midwin, r, split_x, ACS_VLINE);
+		}
+		char hdr[64];
+		snprintf(hdr, sizeof(hdr), " %s%s ", (other->filename && *other->filename) ? tail(other->filename) : "[No Name]", other->modified ? " *" : "");
+		wattron(midwin, A_REVERSE | A_BOLD);
+		mvwprintw(midwin, 0, split_x + 1, "%-*.*s", COLS - split_x - 1, COLS - split_x - 1, hdr);
+		wattroff(midwin, A_REVERSE | A_BOLD);
+
+		r = 1;
+		while (r < editwinrows && other_line) {
+			char *disp = display_string(other_line->data, 0, COLS - split_x - 2, TRUE, FALSE);
+			mvwprintw(midwin, r, split_x + 1, "%-*.*s", COLS - split_x - 1, COLS - split_x - 1, disp);
+			free(disp);
+			other_line = other_line->next;
+			r++;
+		}
+		while (r < editwinrows) {
+			mvwprintw(midwin, r, split_x + 1, "%*s", COLS - split_x - 1, " ");
+			r++;
+		}
+	}
+
 #ifdef TIMEREFRESH
 	statusline(NOTICE, "Refresh: %.1f ms", 1000 * (double)(clock() - start) / CLOCKS_PER_SEC);
 #endif
@@ -3883,3 +3964,125 @@ void do_credits(void)
 	draw_all_subwindows();
 }
 #endif /* ENABLE_EXTRA */
+
+/* Feature 4: Find matching bracket */
+void find_bracket_match(linestruct *line, size_t x, linestruct **out_line, size_t *out_x)
+{
+	*out_line = NULL;
+	*out_x = 0;
+	if (!line || !line->data || x >= strlen(line->data))
+		return;
+
+	char c = line->data[x];
+	char target = '\0';
+	int dir = 0;
+
+	if (c == '(') { target = ')'; dir = 1; }
+	else if (c == '[') { target = ']'; dir = 1; }
+	else if (c == '{') { target = '}'; dir = 1; }
+	else if (c == ')') { target = '('; dir = -1; }
+	else if (c == ']') { target = '['; dir = -1; }
+	else if (c == '}') { target = '{'; dir = -1; }
+	else return;
+
+	int depth = 1;
+	linestruct *cur = line;
+	ssize_t cur_x = (ssize_t)x + dir;
+
+	int line_limit = 300;
+	while (cur != NULL && line_limit-- > 0) {
+		size_t len = strlen(cur->data);
+		while (cur_x >= 0 && (size_t)cur_x < len) {
+			if (cur->data[cur_x] == c)
+				depth++;
+			else if (cur->data[cur_x] == target) {
+				depth--;
+				if (depth == 0) {
+					*out_line = cur;
+					*out_x = (size_t)cur_x;
+					return;
+				}
+			}
+			cur_x += dir;
+		}
+		if (dir == 1) {
+			cur = cur->next;
+			cur_x = 0;
+		} else {
+			cur = cur->prev;
+			cur_x = (cur != NULL) ? (ssize_t)strlen(cur->data) - 1 : -1;
+		}
+	}
+}
+
+/* Feature 7: Split View toggle (Ctrl+\). */
+bool split_view_active = FALSE;
+
+void toggle_split_view(void)
+{
+	split_view_active = !split_view_active;
+	if (split_view_active) {
+		editwincols = (COLS - margin - sidebar - explorer_cols) / 2 - 1;
+		if (editwincols < 10)
+			editwincols = 10;
+		statusline(INFO, _("Split view active (Ctrl+\\ to toggle)"));
+	} else {
+		editwincols = COLS - margin - sidebar - explorer_cols;
+		statusline(INFO, _("Split view closed"));
+	}
+	refresh_needed = TRUE;
+}
+
+/* Feature 8: Git Gutter Indicators */
+typedef struct GutterRange {
+	ssize_t start;
+	ssize_t end;
+	char type; /* '+' or '~' */
+} GutterRange;
+
+static GutterRange gutter_ranges[256];
+static int gutter_range_count = 0;
+
+void git_gutter_update(void)
+{
+	gutter_range_count = 0;
+	if (!openfile || !openfile->filename || !openfile->filename[0])
+		return;
+
+	char cmd[512];
+	snprintf(cmd, sizeof(cmd), "git diff -U0 --no-color HEAD -- \"%s\" 2>/dev/null", openfile->filename);
+	FILE *fp = popen(cmd, "r");
+	if (!fp)
+		return;
+
+	char buf[256];
+	while (gutter_range_count < 250 && fgets(buf, sizeof(buf), fp)) {
+		if (buf[0] == '@' && buf[1] == '@') {
+			ssize_t old_start = 0, old_count = 1, new_start = 0, new_count = 1;
+			char *plus = strchr(buf, '+');
+			char *minus = strchr(buf, '-');
+			if (!plus || !minus)
+				continue;
+
+			if (sscanf(minus + 1, "%zd,%zd", &old_start, &old_count) < 2)
+				old_count = 1;
+			if (sscanf(plus + 1, "%zd,%zd", &new_start, &new_count) < 2)
+				new_count = 1;
+
+			gutter_ranges[gutter_range_count].start = new_start;
+			gutter_ranges[gutter_range_count].end = new_start + ((new_count > 0) ? new_count - 1 : 0);
+			gutter_ranges[gutter_range_count].type = (old_count == 0) ? '+' : '~';
+			gutter_range_count++;
+		}
+	}
+	pclose(fp);
+}
+
+char git_gutter_status(ssize_t lineno)
+{
+	for (int i = 0; i < gutter_range_count; i++) {
+		if (lineno >= gutter_ranges[i].start && lineno <= gutter_ranges[i].end)
+			return gutter_ranges[i].type;
+	}
+	return ' ';
+}

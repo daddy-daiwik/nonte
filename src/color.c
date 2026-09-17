@@ -67,6 +67,12 @@ void set_interface_colorpairs(void)
 			else if (index == ERROR_MESSAGE) {
 				init_pair(index + 1, COLOR_WHITE, COLOR_RED);
 				interface_color_pair[index] = COLOR_PAIR(index + 1) | A_BOLD;
+			} else if (index == GIT_ADDED) {
+				init_pair(index + 1, COLOR_GREEN, THE_DEFAULT);
+				interface_color_pair[index] = COLOR_PAIR(index + 1) | A_BOLD;
+			} else if (index == GIT_MODIFIED) {
+				init_pair(index + 1, COLOR_YELLOW, THE_DEFAULT);
+				interface_color_pair[index] = COLOR_PAIR(index + 1) | A_BOLD;
 			} else
 				interface_color_pair[index] = hilite_attribute;
 		}
@@ -77,6 +83,8 @@ void set_interface_colorpairs(void)
 	if (rescind_colors) {
 		interface_color_pair[SPOTLIGHTED] = A_REVERSE;
 		interface_color_pair[ERROR_MESSAGE] = A_REVERSE;
+		interface_color_pair[GIT_ADDED] = A_BOLD;
+		interface_color_pair[GIT_MODIFIED] = A_BOLD;
 	}
 }
 

@@ -974,7 +974,7 @@ void do_command_palette(void)
 		box(palwin, 0, 0);
 
 		wattron(palwin, A_BOLD);
-		mvwprintw(palwin, 0, 2, " Command Palette ");
+		mvwprintw(palwin, 0, 2, " Nonte Command Palette ");
 		mvwprintw(palwin, 1, 2, "> %s", query);
 		wattroff(palwin, A_BOLD);
 
@@ -1082,4 +1082,377 @@ void do_command_palette(void)
 
 	if (chosen_func)
 		chosen_func();
+}
+
+/* Feature 5: Quick open file by name (Ctrl+P). */
+void do_quick_open(void)
+{
+	char *files[512];
+	int file_count = 0;
+
+	FILE *fp = popen("find . -maxdepth 5 -not -path '*/.*' -type f 2>/dev/null", "r");
+	if (fp != NULL) {
+		char linebuf[512];
+		while (file_count < 500 && fgets(linebuf, sizeof(linebuf), fp)) {
+			size_t l = strlen(linebuf);
+			while (l > 0 && (linebuf[l - 1] == '\r' || linebuf[l - 1] == '\n'))
+				linebuf[--l] = '\0';
+			const char *p = linebuf;
+			if (p[0] == '.' && p[1] == '/')
+				p += 2;
+			if (*p)
+				files[file_count++] = copy_of(p);
+		}
+		pclose(fp);
+	}
+
+	if (file_count == 0) {
+		statusline(AHEM, _("No files found in workspace"));
+		return;
+	}
+
+	int pwidth = (COLS > 76) ? 74 : (COLS - 4);
+	if (pwidth < 28)
+		pwidth = COLS;
+	int pheight = (LINES > 20) ? 15 : (LINES - 4);
+	if (pheight < 6)
+		pheight = LINES;
+	int start_y = (LINES > pheight) ? 1 : 0;
+	int start_x = (COLS > pwidth) ? (COLS - pwidth) / 2 : 0;
+
+	WINDOW *palwin = newwin(pheight, pwidth, start_y, start_x);
+	if (palwin == NULL) {
+		for (int i = 0; i < file_count; i++)
+			free(files[i]);
+		return;
+	}
+
+	keypad(palwin, TRUE);
+	wtimeout(palwin, -1);
+
+	char query[128] = "";
+	int query_len = 0;
+	int selected_idx = 0;
+	int scroll_offset = 0;
+	char *chosen_file = NULL;
+
+	while (TRUE) {
+		int matches[512];
+		int match_count = 0;
+
+		for (int i = 0; i < file_count; i++) {
+			if (query_len == 0 || palette_casestr(files[i], query))
+				matches[match_count++] = i;
+		}
+
+		if (selected_idx >= match_count)
+			selected_idx = (match_count > 0) ? match_count - 1 : 0;
+		if (selected_idx < scroll_offset)
+			scroll_offset = selected_idx;
+		int list_rows = pheight - 4;
+		if (list_rows <= 0)
+			list_rows = 1;
+		if (selected_idx >= scroll_offset + list_rows)
+			scroll_offset = selected_idx - list_rows + 1;
+
+		werase(palwin);
+		box(palwin, 0, 0);
+
+		wattron(palwin, A_BOLD);
+		mvwprintw(palwin, 0, 2, " Quick Open File (Ctrl+P) ");
+		mvwprintw(palwin, 1, 2, "> %s", query);
+		wattroff(palwin, A_BOLD);
+
+		wattron(palwin, A_REVERSE);
+		waddch(palwin, ' ');
+		wattroff(palwin, A_REVERSE);
+
+		wmove(palwin, 2, 1);
+		whline(palwin, ACS_HLINE, pwidth - 2);
+
+		for (int r = 0; r < list_rows; r++) {
+			int m = scroll_offset + r;
+			int row = 3 + r;
+			if (m >= match_count)
+				break;
+
+			const char *fname = files[matches[m]];
+			bool is_sel = (m == selected_idx);
+
+			if (is_sel)
+				wattron(palwin, A_REVERSE | A_BOLD);
+
+			mvwprintw(palwin, row, 2, "%-*.*s", pwidth - 4, pwidth - 4, fname);
+
+			if (is_sel)
+				wattroff(palwin, A_REVERSE | A_BOLD);
+		}
+
+		if (match_count > 0)
+			mvwprintw(palwin, pheight - 1, 2, " %i/%i [Enter: Open, Esc: Close] ",
+					selected_idx + 1, match_count);
+		else
+			mvwprintw(palwin, pheight - 1, 2, " No matching files [Esc: Close] ");
+
+		wrefresh(palwin);
+
+		int ch = wgetch(palwin);
+
+		if (ch == 27 || ch == 3 || ch == 7) {
+			chosen_file = NULL;
+			break;
+		} else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+			if (match_count > 0)
+				chosen_file = copy_of(files[matches[selected_idx]]);
+			break;
+		} else if (ch == KEY_UP || ch == 16) {
+			if (selected_idx > 0)
+				selected_idx--;
+		} else if (ch == KEY_DOWN || ch == 14) {
+			if (selected_idx + 1 < match_count)
+				selected_idx++;
+		} else if (ch == KEY_PPAGE) {
+			selected_idx -= list_rows;
+			if (selected_idx < 0)
+				selected_idx = 0;
+		} else if (ch == KEY_NPAGE) {
+			selected_idx += list_rows;
+			if (selected_idx >= match_count)
+				selected_idx = (match_count > 0) ? match_count - 1 : 0;
+		} else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b' || ch == 8) {
+			if (query_len > 0) {
+				query[--query_len] = '\0';
+				selected_idx = 0;
+				scroll_offset = 0;
+			}
+		} else if (ch == 21) {
+			query[0] = '\0';
+			query_len = 0;
+			selected_idx = 0;
+			scroll_offset = 0;
+		} else if (ch >= 0x20 && ch <= 0x7E) {
+			if (query_len < (int)sizeof(query) - 2) {
+				query[query_len++] = (char)ch;
+				query[query_len] = '\0';
+				selected_idx = 0;
+				scroll_offset = 0;
+			}
+		}
+	}
+
+	for (int i = 0; i < file_count; i++)
+		free(files[i]);
+
+	delwin(palwin);
+	full_refresh();
+	edit_refresh();
+
+	if (chosen_file) {
+		open_buffer(chosen_file, TRUE);
+		free(chosen_file);
+	}
+}
+
+typedef struct GrepMatch {
+	char *filepath;
+	ssize_t lineno;
+	char *content;
+} GrepMatch;
+
+/* Feature 9: Project-Wide Grep / Find in Files (Ctrl+Shift+F). */
+void do_find_in_files(void)
+{
+	int pwidth = (COLS > 84) ? 80 : (COLS - 4);
+	if (pwidth < 28)
+		pwidth = COLS;
+	int pheight = (LINES > 20) ? 16 : (LINES - 4);
+	if (pheight < 6)
+		pheight = LINES;
+	int start_y = (LINES > pheight) ? 1 : 0;
+	int start_x = (COLS > pwidth) ? (COLS - pwidth) / 2 : 0;
+
+	WINDOW *palwin = newwin(pheight, pwidth, start_y, start_x);
+	if (palwin == NULL)
+		return;
+
+	keypad(palwin, TRUE);
+	wtimeout(palwin, -1);
+
+	char query[128] = "";
+	int query_len = 0;
+	int selected_idx = 0;
+	int scroll_offset = 0;
+
+	GrepMatch matches[200];
+	int match_count = 0;
+	char last_searched[128] = "";
+
+	while (TRUE) {
+		if (strcmp(query, last_searched) != 0) {
+			for (int i = 0; i < match_count; i++) {
+				free(matches[i].filepath);
+				free(matches[i].content);
+			}
+			match_count = 0;
+			selected_idx = 0;
+			scroll_offset = 0;
+			snprintf(last_searched, sizeof(last_searched), "%s", query);
+
+			if (query_len >= 2) {
+				char cmd[512];
+				snprintf(cmd, sizeof(cmd), "grep -rn -I --exclude-dir=.git --exclude-dir=node_modules -m 150 -e \"%s\" . 2>/dev/null", query);
+				FILE *fp = popen(cmd, "r");
+				if (fp != NULL) {
+					char linebuf[512];
+					while (match_count < 150 && fgets(linebuf, sizeof(linebuf), fp)) {
+						size_t l = strlen(linebuf);
+						while (l > 0 && (linebuf[l - 1] == '\r' || linebuf[l - 1] == '\n'))
+							linebuf[--l] = '\0';
+						char *fstart = linebuf;
+						if (fstart[0] == '.' && fstart[1] == '/')
+							fstart += 2;
+						char *colon1 = strchr(fstart, ':');
+						if (!colon1)
+							continue;
+						*colon1 = '\0';
+						char *lstart = colon1 + 1;
+						char *colon2 = strchr(lstart, ':');
+						if (!colon2)
+							continue;
+						*colon2 = '\0';
+						char *text = colon2 + 1;
+						while (*text == ' ' || *text == '\t')
+							text++;
+
+						matches[match_count].filepath = copy_of(fstart);
+						matches[match_count].lineno = atol(lstart);
+						matches[match_count].content = copy_of(text);
+						match_count++;
+					}
+					pclose(fp);
+				}
+			}
+		}
+
+		if (selected_idx >= match_count)
+			selected_idx = (match_count > 0) ? match_count - 1 : 0;
+		if (selected_idx < scroll_offset)
+			scroll_offset = selected_idx;
+		int list_rows = pheight - 4;
+		if (list_rows <= 0)
+			list_rows = 1;
+		if (selected_idx >= scroll_offset + list_rows)
+			scroll_offset = selected_idx - list_rows + 1;
+
+		werase(palwin);
+		box(palwin, 0, 0);
+
+		wattron(palwin, A_BOLD);
+		mvwprintw(palwin, 0, 2, " Find in Files (Ctrl+Shift+F) ");
+		mvwprintw(palwin, 1, 2, "> %s", query);
+		wattroff(palwin, A_BOLD);
+
+		wattron(palwin, A_REVERSE);
+		waddch(palwin, ' ');
+		wattroff(palwin, A_REVERSE);
+
+		wmove(palwin, 2, 1);
+		whline(palwin, ACS_HLINE, pwidth - 2);
+
+		for (int r = 0; r < list_rows; r++) {
+			int m = scroll_offset + r;
+			int row = 3 + r;
+			if (m >= match_count)
+				break;
+
+			GrepMatch *gm = &matches[m];
+			bool is_sel = (m == selected_idx);
+
+			char display_item[256];
+			snprintf(display_item, sizeof(display_item), "%s:%zd: %s", gm->filepath, gm->lineno, gm->content);
+
+			if (is_sel)
+				wattron(palwin, A_REVERSE | A_BOLD);
+
+			mvwprintw(palwin, row, 2, "%-*.*s", pwidth - 4, pwidth - 4, display_item);
+
+			if (is_sel)
+				wattroff(palwin, A_REVERSE | A_BOLD);
+		}
+
+		if (match_count > 0)
+			mvwprintw(palwin, pheight - 1, 2, " %i/%i [Enter: Jump, Esc: Close] ",
+					selected_idx + 1, match_count);
+		else if (query_len < 2)
+			mvwprintw(palwin, pheight - 1, 2, " Type at least 2 chars to search [Esc: Close] ");
+		else
+			mvwprintw(palwin, pheight - 1, 2, " No matches found [Esc: Close] ");
+
+		wrefresh(palwin);
+
+		int ch = wgetch(palwin);
+
+		if (ch == 27 || ch == 3 || ch == 7) {
+			break;
+		} else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+			if (match_count > 0) {
+				char *fp_copy = copy_of(matches[selected_idx].filepath);
+				ssize_t target_line = matches[selected_idx].lineno;
+				for (int i = 0; i < match_count; i++) {
+					free(matches[i].filepath);
+					free(matches[i].content);
+				}
+				delwin(palwin);
+				full_refresh();
+				edit_refresh();
+				open_buffer(fp_copy, TRUE);
+				goto_line_posx(target_line, 0);
+				statusline(INFO, _("Jumped to %s:%zd"), fp_copy, target_line);
+				free(fp_copy);
+				return;
+			}
+			break;
+		} else if (ch == KEY_UP || ch == 16) {
+			if (selected_idx > 0)
+				selected_idx--;
+		} else if (ch == KEY_DOWN || ch == 14) {
+			if (selected_idx + 1 < match_count)
+				selected_idx++;
+		} else if (ch == KEY_PPAGE) {
+			selected_idx -= list_rows;
+			if (selected_idx < 0)
+				selected_idx = 0;
+		} else if (ch == KEY_NPAGE) {
+			selected_idx += list_rows;
+			if (selected_idx >= match_count)
+				selected_idx = (match_count > 0) ? match_count - 1 : 0;
+		} else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b' || ch == 8) {
+			if (query_len > 0) {
+				query[--query_len] = '\0';
+				selected_idx = 0;
+				scroll_offset = 0;
+			}
+		} else if (ch == 21) {
+			query[0] = '\0';
+			query_len = 0;
+			selected_idx = 0;
+			scroll_offset = 0;
+		} else if (ch >= 0x20 && ch <= 0x7E) {
+			if (query_len < (int)sizeof(query) - 2) {
+				query[query_len++] = (char)ch;
+				query[query_len] = '\0';
+				selected_idx = 0;
+				scroll_offset = 0;
+			}
+		}
+	}
+
+	for (int i = 0; i < match_count; i++) {
+		free(matches[i].filepath);
+		free(matches[i].content);
+	}
+
+	delwin(palwin);
+	full_refresh();
+	edit_refresh();
 }

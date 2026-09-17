@@ -683,15 +683,8 @@ void usage(void)
  * information, and the configuration options this nano was compiled with. */
 void version(void)
 {
-#ifdef REVISION
-	printf(" GNU nano from git, %s\n", REVISION);
-#else
-	printf(_(" GNU nano, version %s\n"), VERSION);
-#endif
-#ifndef NANO_TINY
-	/* TRANSLATORS: The %s is the year of the latest release. */
-	printf(_(" (C) %s the Free Software Foundation and various contributors\n"), "2026");
-#endif
+	printf(" Nonte 0.1.0-dev (based on GNU nano)\n");
+	printf(" (C) 2026 Nonte Team, Free Software Foundation, and contributors\n");
 	printf(_(" Compiled options:"));
 
 #ifdef NANO_TINY
@@ -1770,6 +1763,37 @@ void process_a_keystroke(void)
 				}
 			}
 #endif
+			/* Step over closing bracket or quote if character under cursor matches */
+			if ((input == ')' || input == ']' || input == '}' || input == '"' || input == '\'' || input == '`') &&
+					openfile->current->data[openfile->current_x] == (char)input) {
+				openfile->current_x++;
+				openfile->placewewant = xplustabs();
+				refresh_needed = TRUE;
+				return;
+			}
+
+			/* Auto-close bracket or quote pair */
+			if (input == '(' || input == '[' || input == '{' || input == '"' || input == '\'' || input == '`') {
+				if (depth > 0) {
+					puddle[depth] = '\0';
+					inject(puddle, depth);
+					depth = 0;
+				}
+				char pair[3];
+				pair[0] = (char)input;
+				if (input == '(') pair[1] = ')';
+				else if (input == '[') pair[1] = ']';
+				else if (input == '{') pair[1] = '}';
+				else pair[1] = (char)input;
+				pair[2] = '\0';
+				inject(pair, 2);
+				openfile->current_x--;
+				openfile->placewewant = xplustabs();
+				refresh_needed = TRUE;
+				update_autocomplete();
+				return;
+			}
+
 			/* When the input buffer (plus room for terminating NUL) is full,
 			 * extend it; otherwise, if it does not exist yet, create it. */
 			if (depth + 1 == capacity) {

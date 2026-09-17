@@ -23,6 +23,7 @@
 
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
 
 static bool came_full_circle = FALSE;
 		/* Have we reached the starting line again while searching? */
@@ -1066,3 +1067,110 @@ void to_next_anchor(void)
 	go_to_and_confirm(line);
 }
 #endif /* !NANO_TINY */
+
+/* Feature 6: Select word under cursor, or jump and select next occurrence (Ctrl+D). */
+void do_next_occurrence(void)
+{
+	if (!openfile->mark) {
+		const char *data = openfile->current->data;
+		size_t len = strlen(data);
+		if (len == 0)
+			return;
+
+		size_t pos = openfile->current_x;
+		if (pos >= len && pos > 0)
+			pos = len - 1;
+
+		if (!(isalnum((unsigned char)data[pos]) || data[pos] == '_')) {
+			if (pos > 0 && (isalnum((unsigned char)data[pos - 1]) || data[pos - 1] == '_'))
+				pos--;
+			else
+				return;
+		}
+
+		size_t start = pos;
+		while (start > 0 && (isalnum((unsigned char)data[start - 1]) || data[start - 1] == '_'))
+			start--;
+
+		size_t end = pos;
+		while (end < len && (isalnum((unsigned char)data[end]) || data[end] == '_'))
+			end++;
+
+		if (start < end) {
+			openfile->mark = openfile->current;
+			openfile->mark_x = start;
+			openfile->current_x = end;
+			openfile->placewewant = xplustabs();
+			openfile->softmark = TRUE;
+			refresh_needed = TRUE;
+			statusline(HUSH, _("Selected word"));
+		}
+	} else {
+		linestruct *top, *bot;
+		size_t top_x, bot_x;
+		get_region(&top, &top_x, &bot, &bot_x);
+
+		if (top != bot || top_x == bot_x) {
+			statusline(AHEM, _("Multi-line selection not supported for next occurrence"));
+			return;
+		}
+
+		size_t match_len = bot_x - top_x;
+		char *target = nmalloc(match_len + 1);
+		strncpy(target, top->data + top_x, match_len);
+		target[match_len] = '\0';
+
+		linestruct *search_line = bot;
+		size_t start_col = bot_x;
+		bool found = FALSE;
+
+		while (search_line != NULL) {
+			char *found_ptr = strstr(search_line->data + start_col, target);
+			if (found_ptr != NULL) {
+				size_t found_x = found_ptr - search_line->data;
+				openfile->current = search_line;
+				openfile->mark = search_line;
+				openfile->mark_x = found_x;
+				openfile->current_x = found_x + match_len;
+				openfile->placewewant = xplustabs();
+				openfile->softmark = TRUE;
+				refresh_needed = TRUE;
+				statusline(HUSH, _("Found next occurrence of \"%s\""), target);
+				found = TRUE;
+				break;
+			}
+			search_line = search_line->next;
+			start_col = 0;
+		}
+
+		if (!found) {
+			search_line = openfile->filetop;
+			while (search_line != NULL && (search_line->lineno < top->lineno ||
+					(search_line == top && start_col < top_x))) {
+				char *found_ptr = strstr(search_line->data + start_col, target);
+				if (found_ptr != NULL) {
+					size_t found_x = found_ptr - search_line->data;
+					if (search_line == top && found_x >= top_x)
+						break;
+					openfile->current = search_line;
+					openfile->mark = search_line;
+					openfile->mark_x = found_x;
+					openfile->current_x = found_x + match_len;
+					openfile->placewewant = xplustabs();
+					openfile->softmark = TRUE;
+					refresh_needed = TRUE;
+					statusline(HUSH, _("Found next occurrence (wrapped)"));
+					found = TRUE;
+					break;
+				}
+				search_line = search_line->next;
+				start_col = 0;
+			}
+		}
+
+		if (!found)
+			statusline(REMARK, _("No other occurrences of \"%s\""), target);
+
+		free(target);
+	}
+}
