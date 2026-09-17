@@ -13,6 +13,8 @@ core
 .gdb_history
 .gdbinit
 
+/icon/Gemini_*
+
 /src/nano
 /src/revision.h
 

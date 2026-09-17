@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Nonte
+GenericName=Text Editor
+Comment=Nonte - Modern Enhanced Terminal Text Editor
+Exec=nonte %F
+Terminal=true
+Icon=nonte
+Categories=Development;TextEditor;Utility;
+MimeType=text/plain;text/x-chdr;text/x-csrc;text/x-c++hdr;text/x-c++src;text/x-python;text/x-shellscript;text/markdown;application/json;
+Keywords=text;editor;development;terminal;nano;nonte;
+StartupNotify=false
