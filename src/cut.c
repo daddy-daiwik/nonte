@@ -115,13 +115,19 @@ void expunge(undo_type action)
 }
 
 /* Delete the character under the cursor plus any succeeding zero-widths,
- * or, when the mark is on and --zap is active, delete the marked region. */
+ * or, when a region is marked, delete the marked region. */
 void do_delete(void)
 {
 #ifndef NANO_TINY
-	if (openfile->mark && ISSET(LET_THEM_ZAP))
-		zap_text();
-	else
+	if (openfile->mark) {
+		if (openfile->mark != openfile->current || openfile->mark_x != openfile->current_x) {
+			zap_text();
+			return;
+		}
+		openfile->mark = NULL;
+		openfile->softmark = FALSE;
+		refresh_needed = TRUE;
+	}
 #endif
 	{
 		expunge(DEL);
@@ -135,13 +141,19 @@ void do_delete(void)
 
 /* Backspace over one character.  That is, move the cursor left one
  * character, and then delete the character under the cursor.  Or,
- * when mark is on and --zap is active, delete the marked region. */
+ * when a region is marked, delete the marked region. */
 void do_backspace(void)
 {
 #ifndef NANO_TINY
-	if (openfile->mark && ISSET(LET_THEM_ZAP))
-		zap_text();
-	else
+	if (openfile->mark) {
+		if (openfile->mark != openfile->current || openfile->mark_x != openfile->current_x) {
+			zap_text();
+			return;
+		}
+		openfile->mark = NULL;
+		openfile->softmark = FALSE;
+		refresh_needed = TRUE;
+	}
 #endif
 	if (openfile->current_x > 0) {
 		openfile->current_x = step_left(openfile->current->data, openfile->current_x);
@@ -501,6 +513,7 @@ void do_snip(bool marked, bool until_eof, bool append)
 	else if (openfile->mark) {
 		cut_marked_region();
 		openfile->mark = NULL;
+		openfile->softmark = FALSE;
 	} else if (ISSET(CUT_FROM_CURSOR)) {
 		/* When not at the end of a line, move the rest of this line into
 		 * the cutbuffer.  Otherwise, when not at the end of the buffer,
@@ -614,10 +627,11 @@ void copy_marked_region(void)
 
 	openfile->last_action = OTHER;
 	keep_cutbuffer = FALSE;
-	openfile->mark = NULL;
 	refresh_needed = TRUE;
 
 	if (topline == botline && top_x == bot_x) {
+		openfile->mark = NULL;
+		openfile->softmark = FALSE;
 		statusbar(_("Copied nothing"));
 		return;
 	}
@@ -636,6 +650,11 @@ void copy_marked_region(void)
 	topline->data = was_datastart;
 	botline->data[bot_x] = saved_byte;
 	botline->next = afterline;
+
+	if (!openfile->softmark)
+		openfile->mark = NULL;
+
+	statusbar(_("Copied selection"));
 }
 #endif /* !NANO_TINY */
 
@@ -726,6 +745,22 @@ void copy_text(void)
 /* Copy text from the cutbuffer into the current buffer. */
 void paste_text(void)
 {
+	if (cutbuffer == NULL) {
+		statusline(AHEM, _("Cutbuffer is empty"));
+		return;
+	}
+
+#ifndef NANO_TINY
+	if (openfile->mark) {
+		if (openfile->mark != openfile->current || openfile->mark_x != openfile->current_x)
+			zap_text();
+		else {
+			openfile->mark = NULL;
+			openfile->softmark = FALSE;
+		}
+	}
+#endif
+
 #if defined(ENABLE_WRAPPING) || !defined(NANO_TINY)
 	/* Remember where the paste started. */
 	linestruct *was_current = openfile->current;
@@ -735,11 +770,6 @@ void paste_text(void)
 #endif
 	ssize_t was_lineno = openfile->current->lineno;
 	size_t was_leftedge = 0;
-
-	if (cutbuffer == NULL) {
-		statusline(AHEM, _("Cutbuffer is empty"));
-		return;
-	}
 
 #ifndef NANO_TINY
 	add_undo(PASTE, NULL);

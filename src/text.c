@@ -25,6 +25,7 @@
 
 #include "prototypes.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -848,6 +849,16 @@ void do_redo(void)
 /* Break the current line at the cursor position. */
 void do_enter(void)
 {
+#ifndef NANO_TINY
+	if (openfile->mark) {
+		if (openfile->mark != openfile->current || openfile->mark_x != openfile->current_x)
+			zap_text();
+		else {
+			openfile->mark = NULL;
+			openfile->softmark = FALSE;
+		}
+	}
+#endif
 	linestruct *newnode = make_new_node(openfile->current);
 	size_t extra = 0;
 #ifndef NANO_TINY
@@ -3286,3 +3297,215 @@ void complete_a_word(void)
 	free(shard);
 }
 #endif /* ENABLE_WORDCOMPLETION */
+
+/* ==================== Fast Autocomplete (Option B) ==================== */
+
+static const char *ac_python_words[] = {
+	"def", "class", "import", "from", "return", "yield", "lambda",
+	"if", "elif", "else", "while", "for", "in", "try", "except",
+	"finally", "raise", "with", "as", "pass", "break", "continue",
+	"True", "False", "None", "async", "await", "global", "nonlocal",
+	"assert", "print", "len", "range", "enumerate", "zip", "map",
+	"filter", "sorted", "reversed", "sum", "min", "max", "abs",
+	"round", "isinstance", "issubclass", "callable", "hasattr",
+	"getattr", "setattr", "delattr", "open", "input", "str", "int",
+	"float", "bool", "list", "dict", "set", "tuple", "bytes",
+	"append", "extend", "insert", "remove", "pop", "clear", "index",
+	"count", "sort", "reverse", "copy", "keys", "values", "items",
+	"get", "update", "split", "join", "replace", "strip", "lstrip",
+	"rstrip", "startswith", "endswith", "find", "lower", "upper",
+	"title", "format", "encode", "decode", "__init__", "__str__",
+	"__repr__", "__name__", "__main__", "__dict__", "__file__",
+	"self", "super", NULL
+};
+
+static const char *ac_c_words[] = {
+	"auto", "break", "case", "char", "const", "continue", "default",
+	"do", "double", "else", "enum", "extern", "float", "for", "goto",
+	"if", "inline", "int", "long", "register", "restrict", "return",
+	"short", "signed", "sizeof", "static", "struct", "switch",
+	"typedef", "union", "unsigned", "void", "volatile", "while",
+	"bool", "true", "false", "size_t", "ssize_t", "uint8_t",
+	"uint16_t", "uint32_t", "uint64_t", "int8_t", "int16_t",
+	"int32_t", "int64_t", "printf", "fprintf", "sprintf", "snprintf",
+	"scanf", "sscanf", "malloc", "calloc", "realloc", "free",
+	"strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp",
+	"strncmp", "strchr", "strrchr", "strstr", "memcpy", "memmove",
+	"memset", "memcmp", "NULL", "FILE", "stdin", "stdout", "stderr",
+	"fopen", "fclose", "fread", "fwrite", "fgets", "fputs",
+	"include", "define", "ifndef", "ifdef", "endif", NULL
+};
+
+static const char *ac_js_words[] = {
+	"function", "const", "let", "var", "return", "if", "else", "for",
+	"while", "do", "switch", "case", "break", "continue", "default",
+	"try", "catch", "finally", "throw", "new", "this", "typeof",
+	"instanceof", "class", "extends", "super", "import", "export",
+	"from", "async", "await", "yield", "null", "undefined", "true",
+	"false", "console", "document", "window", "Array", "Object",
+	"String", "Number", "Boolean", "Promise", "JSON", "Math", "Date",
+	"RegExp", "Error", "push", "pop", "shift", "unshift", "slice",
+	"splice", "indexOf", "includes", "join", "split", "filter", "map",
+	"reduce", "forEach", "find", "findIndex", "some", "every",
+	"length", "toString", "substring", "toLowerCase", "toUpperCase",
+	"trim", "replace", "replaceAll", "addEventListener",
+	"querySelector", "querySelectorAll", "getElementById",
+	"setTimeout", "setInterval", "clearTimeout", "clearInterval",
+	"parse", "stringify", NULL
+};
+
+static const char *ac_generic_words[] = {
+	"function", "return", "if", "else", "while", "for", "break",
+	"continue", "switch", "case", "default", "import", "export",
+	"true", "false", "null", "print", "length", "string", "number",
+	"boolean", "object", NULL
+};
+
+static const char **get_language_dictionary(void)
+{
+	const char *syntax = (openfile && openfile->syntax && openfile->syntax->name) ? openfile->syntax->name : "";
+	const char *fname = (openfile && openfile->filename) ? openfile->filename : "";
+	const char *ext = strrchr(fname, '.');
+
+	if (strstr(syntax, "python") || (ext && strcmp(ext, ".py") == 0))
+		return ac_python_words;
+	if (strstr(syntax, "c") || (ext && (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 ||
+			strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0 || strcmp(ext, ".cc") == 0)))
+		return ac_c_words;
+	if (strstr(syntax, "javascript") || strstr(syntax, "typescript") ||
+			(ext && (strcmp(ext, ".js") == 0 || strcmp(ext, ".ts") == 0 ||
+			strcmp(ext, ".jsx") == 0 || strcmp(ext, ".tsx") == 0)))
+		return ac_js_words;
+
+	return ac_generic_words;
+}
+
+static void add_autocomplete_candidate(const char *word)
+{
+	if (autocomplete_count >= MAX_AUTOCOMPLETE_MATCHES)
+		return;
+	for (int i = 0; i < autocomplete_count; i++) {
+		if (strcmp(autocomplete_matches[i], word) == 0)
+			return;
+	}
+	strncpy(autocomplete_matches[autocomplete_count], word, 63);
+	autocomplete_matches[autocomplete_count][63] = '\0';
+	autocomplete_count++;
+}
+
+static void scan_line_for_completions(const char *line, const char *prefix, size_t prefix_len, size_t ignore_start)
+{
+	size_t i = 0;
+	while (line[i] != '\0' && autocomplete_count < MAX_AUTOCOMPLETE_MATCHES) {
+		unsigned char c = (unsigned char)line[i];
+		if (isalpha(c) || c == '_') {
+			size_t word_start = i;
+			while (line[i] != '\0' && (isalnum((unsigned char)line[i]) || line[i] == '_'))
+				i++;
+			size_t word_len = i - word_start;
+
+			if (word_start == ignore_start)
+				continue;
+
+			if (word_len > prefix_len && word_len < 60) {
+				if (strncmp(line + word_start, prefix, prefix_len) == 0) {
+					char cand[64];
+					memcpy(cand, line + word_start, word_len);
+					cand[word_len] = '\0';
+					add_autocomplete_candidate(cand);
+				}
+			}
+		} else {
+			i++;
+		}
+	}
+}
+
+void dismiss_autocomplete(void)
+{
+	autocomplete_active = FALSE;
+	autocomplete_count = 0;
+	autocomplete_selected = 0;
+	refresh_needed = TRUE;
+}
+
+void update_autocomplete(void)
+{
+	if ((currmenu & MMAIN) == 0 || !openfile || !openfile->current || ISSET(VIEW_MODE)) {
+		dismiss_autocomplete();
+		return;
+	}
+
+	size_t curr_x = openfile->current_x;
+	const char *data = openfile->current->data;
+	size_t start = curr_x;
+
+	while (start > 0) {
+		size_t oneleft = step_left(data, start);
+		unsigned char c = (unsigned char)data[oneleft];
+		if (!(isalnum(c) || c == '_'))
+			break;
+		start = oneleft;
+	}
+
+	size_t prefix_len = curr_x - start;
+	if (prefix_len < 2 || prefix_len >= 60) {
+		dismiss_autocomplete();
+		return;
+	}
+
+	char prefix[64];
+	memcpy(prefix, data + start, prefix_len);
+	prefix[prefix_len] = '\0';
+
+	if (isdigit((unsigned char)prefix[0])) {
+		dismiss_autocomplete();
+		return;
+	}
+
+	autocomplete_count = 0;
+	autocomplete_selected = 0;
+	autocomplete_prefix_len = prefix_len;
+
+	/* 1. Search current buffer outward from cursor */
+	linestruct *up = openfile->current;
+	linestruct *down = openfile->current->next;
+	int checked = 0;
+
+	while ((up != NULL || down != NULL) && checked < 200 && autocomplete_count < MAX_AUTOCOMPLETE_MATCHES) {
+		if (up != NULL) {
+			scan_line_for_completions(up->data, prefix, prefix_len, (up == openfile->current) ? start : (size_t)-1);
+			up = up->prev;
+			checked++;
+		}
+		if (down != NULL && autocomplete_count < MAX_AUTOCOMPLETE_MATCHES) {
+			scan_line_for_completions(down->data, prefix, prefix_len, (size_t)-1);
+			down = down->next;
+			checked++;
+		}
+	}
+
+	/* 2. Search language keywords/stdlib */
+	const char **lang_words = get_language_dictionary();
+	if (lang_words) {
+		for (int i = 0; lang_words[i] != NULL && autocomplete_count < MAX_AUTOCOMPLETE_MATCHES; i++) {
+			if (strncmp(lang_words[i], prefix, prefix_len) == 0 && strlen(lang_words[i]) > prefix_len)
+				add_autocomplete_candidate(lang_words[i]);
+		}
+	}
+
+	/* 3. Case-insensitive fallback */
+	if (autocomplete_count < MAX_AUTOCOMPLETE_MATCHES && lang_words) {
+		for (int i = 0; lang_words[i] != NULL && autocomplete_count < MAX_AUTOCOMPLETE_MATCHES; i++) {
+			if (strncasecmp(lang_words[i], prefix, prefix_len) == 0 && strlen(lang_words[i]) > prefix_len)
+				add_autocomplete_candidate(lang_words[i]);
+		}
+	}
+
+	if (autocomplete_count > 0) {
+		autocomplete_active = TRUE;
+		refresh_needed = TRUE;
+	} else {
+		dismiss_autocomplete();
+	}
+}

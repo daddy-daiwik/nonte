@@ -50,6 +50,16 @@ bool shift_held;
 bool mute_modifiers = FALSE;
 		/* Whether to ignore modifier keys while running a macro or string bind. */
 
+#ifdef ENABLE_MOUSE
+mmask_t last_mouse_bstate = 0;
+#endif
+
+bool autocomplete_active = FALSE;
+char autocomplete_matches[MAX_AUTOCOMPLETE_MATCHES][64];
+int autocomplete_count = 0;
+int autocomplete_selected = 0;
+size_t autocomplete_prefix_len = 0;
+
 bool we_are_running = FALSE;
 		/* Becomes TRUE as soon as all options and files have been read. */
 bool more_than_one = FALSE;

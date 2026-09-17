@@ -1620,12 +1620,17 @@ int get_mouseinput(int *mouse_y, int *mouse_x)
 	*mouse_x = event.x - (in_middle ? (margin + explorer_cols) : 0);
 	*mouse_y = event.y;
 
-	/* Handle clicks/releases of the first mouse button. */
-	if (event.bstate & (BUTTON1_RELEASED | BUTTON1_CLICKED)) {
+	last_mouse_bstate = event.bstate;
+
+	/* Handle clicks/releases/drags of the first mouse button. */
+	if (event.bstate & (BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED | BUTTON1_TRIPLE_CLICKED | REPORT_MOUSE_POSITION)) {
 #ifdef ENABLE_MULTIBUFFER
 		/* Clicking in the tab bar (topwin) switches tabs or opens a new buffer. */
 		if (topwin != NULL && (currmenu & MMAIN) &&
 				(event.y == 0 || wenclose(topwin, event.y, event.x))) {
+			if (!(event.bstate & (BUTTON1_RELEASED | BUTTON1_CLICKED)))
+				return 2;
+
 			int col = event.x;
 			int scan = 0;
 			openfilestruct *head = startfile ? startfile : openfile;
@@ -1670,6 +1675,8 @@ int get_mouseinput(int *mouse_y, int *mouse_x)
 		/* Clicking on one of the shortcuts in the two help lines
 		 * should be transformed to the equivalent keystroke. */
 		if (in_footer && !ISSET(NO_HELP) && currmenu != MYESNO) {
+			if (!(event.bstate & (BUTTON1_RELEASED | BUTTON1_CLICKED)))
+				return 2;
 			int width;
 				/* The width of each shortcut item, except the last two. */
 			int index;
@@ -3508,8 +3515,80 @@ void edit_refresh(void)
 	if (currmenu & MMAIN)
 		explorer_refresh();
 #endif
+	draw_autocomplete_popup();
 
 	refresh_needed = FALSE;
+}
+
+static WINDOW *autowin = NULL;
+
+void draw_autocomplete_popup(void)
+{
+	if (!autocomplete_active || autocomplete_count == 0 || (currmenu & MMAIN) == 0) {
+		if (autowin != NULL) {
+			delwin(autowin);
+			autowin = NULL;
+		}
+		return;
+	}
+
+	int cur_y = getbegy(midwin) + openfile->cursor_row;
+	int cur_x = getbegx(midwin) + getcurx(midwin);
+	int max_len = 0;
+
+	for (int i = 0; i < autocomplete_count; i++) {
+		int l = strlen(autocomplete_matches[i]);
+		if (l > max_len)
+			max_len = l;
+	}
+
+	int pwidth = max_len + 6;
+	if (pwidth < 16)
+		pwidth = 16;
+	if (pwidth > COLS)
+		pwidth = COLS;
+
+	int pheight = autocomplete_count + 2;
+	int popup_y = cur_y + 1;
+	if (popup_y + pheight > LINES - 1) {
+		if (cur_y - pheight >= 0)
+			popup_y = cur_y - pheight;
+		else
+			popup_y = (cur_y + 1 < LINES) ? cur_y + 1 : 0;
+	}
+
+	int popup_x = cur_x;
+	if (popup_x + pwidth > COLS)
+		popup_x = COLS - pwidth;
+	if (popup_x < 0)
+		popup_x = 0;
+
+	if (autowin != NULL) {
+		delwin(autowin);
+		autowin = NULL;
+	}
+
+	autowin = newwin(pheight, pwidth, popup_y, popup_x);
+	if (!autowin)
+		return;
+
+	wattron(autowin, interface_color_pair[PROMPT_BAR] | A_BOLD);
+	box(autowin, 0, 0);
+	wattroff(autowin, interface_color_pair[PROMPT_BAR] | A_BOLD);
+
+	for (int i = 0; i < autocomplete_count; i++) {
+		if (i == autocomplete_selected) {
+			wattron(autowin, A_REVERSE | A_BOLD);
+			mvwprintw(autowin, i + 1, 1, " > %-*.*s", pwidth - 5, pwidth - 5, autocomplete_matches[i]);
+			wattroff(autowin, A_REVERSE | A_BOLD);
+		} else {
+			mvwprintw(autowin, i + 1, 1, "   %-*.*s", pwidth - 5, pwidth - 5, autocomplete_matches[i]);
+		}
+	}
+
+	wnoutrefresh(autowin);
+	wmove(midwin, openfile->cursor_row, getcurx(midwin));
+	wnoutrefresh(midwin);
 }
 
 /* Move edittop so that current is on the screen.  manner says how:

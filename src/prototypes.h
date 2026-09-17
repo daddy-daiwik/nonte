@@ -35,6 +35,21 @@ extern bool meta_key;
 extern bool shift_held;
 extern bool mute_modifiers;
 
+#ifdef ENABLE_MOUSE
+extern mmask_t last_mouse_bstate;
+#endif
+
+#define MAX_AUTOCOMPLETE_MATCHES 5
+extern bool autocomplete_active;
+extern char autocomplete_matches[MAX_AUTOCOMPLETE_MATCHES][64];
+extern int autocomplete_count;
+extern int autocomplete_selected;
+extern size_t autocomplete_prefix_len;
+
+void update_autocomplete(void);
+void draw_autocomplete_popup(void);
+void dismiss_autocomplete(void);
+
 extern bool we_are_running;
 extern bool more_than_one;
 extern bool report_size;

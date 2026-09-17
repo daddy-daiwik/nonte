@@ -487,8 +487,8 @@ void disable_mouse_support(void)
 
 void enable_mouse_support(void)
 {
-	mousemask(ALL_MOUSE_EVENTS, NULL);
-	oldinterval = mouseinterval(50);
+	mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL);
+	oldinterval = mouseinterval(200);
 }
 
 /* Switch mouse support on or off, as needed. */
@@ -1367,14 +1367,23 @@ int process_click(void)
 	if (retval != 0)
 		return retval;
 
+	dismiss_autocomplete();
+
 	/* If the click was in the edit window, put the cursor in that spot. */
 	if (wmouse_trafo(midwin, &click_row, &click_col, FALSE)) {
+		if (click_col < 0)
+			click_col = 0;
+		if (click_col >= editwincols)
+			click_col = editwincols - 1;
+		if (click_row < 0)
+			click_row = 0;
+		if (click_row >= editwinrows)
+			click_row = editwinrows - 1;
+
 		linestruct *was_current = openfile->current;
 		ssize_t row_count = click_row - openfile->cursor_row;
 		size_t leftedge;
 #ifndef NANO_TINY
-		size_t was_x = openfile->current_x;
-
 		if (ISSET(SOFTWRAP))
 			leftedge = leftedge_for(xplustabs(), openfile->current);
 		else
@@ -1391,15 +1400,81 @@ int process_click(void)
 								actual_last_column(leftedge, click_col));
 
 #ifndef NANO_TINY
-		/* Clicking there where the cursor is toggles the mark. */
-		if (row_count == 0 && openfile->current_x == was_x) {
-			do_mark();
-			if (ISSET(STATEFLAGS))
-				titlebar(NULL);
-		} else
+		static linestruct *drag_anchor_line = NULL;
+		static size_t drag_anchor_x = 0;
+		static bool mouse_dragging = FALSE;
+
+		if (last_mouse_bstate & BUTTON1_DOUBLE_CLICKED) {
+			size_t start = openfile->current_x;
+			size_t end = openfile->current_x;
+			while (start > 0) {
+				size_t prev = step_left(openfile->current->data, start);
+				if (!is_word_char(&openfile->current->data[prev], FALSE))
+					break;
+				start = prev;
+			}
+			while (openfile->current->data[end] != '\0' &&
+					is_word_char(&openfile->current->data[end], FALSE)) {
+				end = step_right(openfile->current->data, end);
+			}
+			if (end > start) {
+				openfile->mark = openfile->current;
+				openfile->mark_x = start;
+				openfile->current_x = end;
+				openfile->softmark = TRUE;
+			}
+			mouse_dragging = FALSE;
+			drag_anchor_line = NULL;
+			refresh_needed = TRUE;
+		} else if (last_mouse_bstate & BUTTON1_TRIPLE_CLICKED) {
+			openfile->mark = openfile->current;
+			openfile->mark_x = 0;
+			openfile->current_x = strlen(openfile->current->data);
+			openfile->softmark = TRUE;
+			mouse_dragging = FALSE;
+			drag_anchor_line = NULL;
+			refresh_needed = TRUE;
+		} else if (last_mouse_bstate & BUTTON1_PRESSED) {
+			drag_anchor_line = openfile->current;
+			drag_anchor_x = openfile->current_x;
+			mouse_dragging = TRUE;
+			openfile->mark = NULL;
+			openfile->softmark = FALSE;
+			refresh_needed = TRUE;
+		} else if (last_mouse_bstate & REPORT_MOUSE_POSITION) {
+			if (mouse_dragging && drag_anchor_line != NULL) {
+				if (openfile->current != drag_anchor_line || openfile->current_x != drag_anchor_x) {
+					openfile->mark = drag_anchor_line;
+					openfile->mark_x = drag_anchor_x;
+					openfile->softmark = TRUE;
+				} else {
+					openfile->mark = NULL;
+					openfile->softmark = FALSE;
+				}
+				refresh_needed = TRUE;
+			}
+		} else if (last_mouse_bstate & (BUTTON1_RELEASED | BUTTON1_CLICKED)) {
+			if (mouse_dragging && drag_anchor_line != NULL) {
+				if (openfile->current != drag_anchor_line || openfile->current_x != drag_anchor_x) {
+					openfile->mark = drag_anchor_line;
+					openfile->mark_x = drag_anchor_x;
+					openfile->softmark = TRUE;
+				} else {
+					openfile->mark = NULL;
+					openfile->softmark = FALSE;
+				}
+				mouse_dragging = FALSE;
+				drag_anchor_line = NULL;
+				refresh_needed = TRUE;
+			} else {
+				openfile->mark = NULL;
+				openfile->softmark = FALSE;
+				refresh_needed = TRUE;
+			}
+		}
 #endif
-			/* The cursor moved; clean the cutbuffer on the next cut. */
-			keep_cutbuffer = FALSE;
+		/* The cursor moved; clean the cutbuffer on the next cut. */
+		keep_cutbuffer = FALSE;
 
 		edit_redraw(was_current, CENTERING);
 	}
@@ -1638,6 +1713,41 @@ void process_a_keystroke(void)
 		return;
 #endif
 
+	/* Autocomplete popup navigation, acceptance, and dismissal */
+	if (autocomplete_active && (currmenu & MMAIN)) {
+		if (input == KEY_DOWN) {
+			autocomplete_selected = (autocomplete_selected + 1) % autocomplete_count;
+			refresh_needed = TRUE;
+			return;
+		} else if (input == KEY_UP) {
+			autocomplete_selected = (autocomplete_selected + autocomplete_count - 1) % autocomplete_count;
+			refresh_needed = TRUE;
+			return;
+		} else if (input == '\t' || input == '\n' || input == KEY_ENTER || input == 13) {
+			const char *chosen = autocomplete_matches[autocomplete_selected];
+			if (strlen(chosen) > autocomplete_prefix_len) {
+				const char *suffix = chosen + autocomplete_prefix_len;
+				inject(copy_of(suffix), strlen(suffix));
+			}
+			dismiss_autocomplete();
+			refresh_needed = TRUE;
+			return;
+		} else if (input == 27 || input == 3) {
+			dismiss_autocomplete();
+			refresh_needed = TRUE;
+			return;
+		} else if (input == KEY_BACKSPACE || input == 127 || input == '\b') {
+			/* Let backspace happen; update_autocomplete will be called afterwards */
+		} else if (input >= 0x20 && input <= 0x7E && !meta_key) {
+			char c = (char)input;
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
+				dismiss_autocomplete();
+			}
+		} else {
+			dismiss_autocomplete();
+		}
+	}
+
 	/* Check for a shortcut in the main list. */
 	shortcut = get_shortcut(input);
 	function = (shortcut ? shortcut->func : NULL);
@@ -1650,9 +1760,14 @@ void process_a_keystroke(void)
 			print_view_warning();
 		else {
 #ifndef NANO_TINY
-			if (openfile->mark && openfile->softmark) {
-				openfile->mark = NULL;
-				refresh_needed = TRUE;
+			if (openfile->mark) {
+				if (openfile->mark != openfile->current || openfile->mark_x != openfile->current_x)
+					zap_text();
+				else {
+					openfile->mark = NULL;
+					openfile->softmark = FALSE;
+					refresh_needed = TRUE;
+				}
 			}
 #endif
 			/* When the input buffer (plus room for terminating NUL) is full,
@@ -1673,6 +1788,8 @@ void process_a_keystroke(void)
 		puddle[depth] = '\0';
 		inject(puddle, depth);
 		depth = 0;
+		if (!function)
+			update_autocomplete();
 	}
 
 #ifndef NANO_TINY
@@ -1749,9 +1866,15 @@ void process_a_keystroke(void)
 						openfile->current_x != was_x ||
 						wanted_to_move(function))) {
 		openfile->mark = NULL;
+		openfile->softmark = FALSE;
 		refresh_needed = TRUE;
 	} else if (openfile->current != was_current)
 		also_the_last = FALSE;
+
+	if (function == do_backspace || function == do_delete)
+		update_autocomplete();
+	else if (function != NULL)
+		dismiss_autocomplete();
 
 	if (ISSET(STATEFLAGS) && openfile->mark != was_mark)
 		titlebar(NULL);
