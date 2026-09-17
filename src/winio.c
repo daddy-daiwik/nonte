@@ -2329,13 +2329,10 @@ void minibar(void)
 		pct = 100;
 
 #ifdef ENABLE_BROWSER
-	if (explorer_path && *explorer_path) {
-		char *temp = copy_of(explorer_path);
-		size_t len = strlen(temp);
-		while (len > 1 && temp[len - 1] == '/')
-			temp[--len] = '\0';
-		ws_display = copy_of(tail(temp));
-		free(temp);
+	char *ws = get_workspace_dir();
+	if (ws && *ws) {
+		ws_display = copy_of(tail(ws));
+		free(ws);
 	}
 #endif
 
@@ -4140,8 +4137,14 @@ void git_gutter_update(void)
 	if (!openfile || !openfile->filename || !openfile->filename[0])
 		return;
 
-	char cmd[512];
-	snprintf(cmd, sizeof(cmd), "git diff -U0 --no-color HEAD -- \"%s\" 2>/dev/null", openfile->filename);
+	char *ws = get_workspace_dir();
+	char *qws = shell_escape(ws);
+	char *qfile = shell_escape(openfile->filename);
+	char cmd[1024];
+	snprintf(cmd, sizeof(cmd), "git -C %s diff -U0 --no-color HEAD -- %s 2>/dev/null", qws, qfile);
+	free(qws);
+	free(qfile);
+	free(ws);
 	FILE *fp = popen(cmd, "r");
 	if (!fp)
 		return;

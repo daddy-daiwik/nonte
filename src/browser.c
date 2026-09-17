@@ -86,12 +86,15 @@ void explorer_toggle(void)
 		return;
 	}
 
-	if (explorer_path == NULL) {
-		explorer_path = nmalloc(PATH_MAX);
-		if (getcwd(explorer_path, PATH_MAX) == NULL)
-			explorer_path = mallocstrcpy(explorer_path, "./");
-		else if (explorer_path[strlen(explorer_path) - 1] != '/')
-			strcat(explorer_path, "/");
+	if (explorer_path == NULL || !custom_workspace_set) {
+		char *ws = get_workspace_dir();
+		explorer_path = free_and_assign(explorer_path, ws);
+		if (explorer_path[strlen(explorer_path) - 1] != '/') {
+			char *slashed = nmalloc(strlen(explorer_path) + 2);
+			sprintf(slashed, "%s/", explorer_path);
+			free(explorer_path);
+			explorer_path = slashed;
+		}
 	}
 
 	explorer_read_directory();
@@ -144,6 +147,7 @@ void do_workspace_select(void)
 	}
 
 	explorer_path = free_and_assign(explorer_path, newpath);
+	custom_workspace_set = TRUE;
 	explorer_read_directory();
 	explorer_visible = TRUE;
 	{
@@ -202,7 +206,8 @@ bool explorer_handle_input(int input)
 		if (explorer_path[strlen(explorer_path) - 1] != '/')
 			strcat(explorer_path, "/");
 		explorer_read_directory();
-	} else if (open_buffer(explorer_items[explorer_selected], TRUE))
+	} else if (switch_to_buffer_if_open(explorer_items[explorer_selected]) ||
+	           open_buffer(explorer_items[explorer_selected], TRUE))
 		prepare_for_display();
 	return TRUE;
 }

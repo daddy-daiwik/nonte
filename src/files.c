@@ -596,6 +596,43 @@ void switch_to_next_buffer(void)
 	redecorate_after_switch();
 }
 
+/* If the given file is already open in one of the buffers, switch to it and return TRUE.
+ * Otherwise, return FALSE. */
+bool switch_to_buffer_if_open(const char *target_path)
+{
+#ifdef ENABLE_MULTIBUFFER
+	if (target_path == NULL || target_path[0] == '\0' || openfile == NULL)
+		return FALSE;
+
+	char *target_full = get_full_path(target_path);
+	if (target_full == NULL)
+		return FALSE;
+
+	openfilestruct *cur = openfile;
+	do {
+		if (cur->filename && cur->filename[0] != '\0') {
+			char *cur_full = get_full_path(cur->filename);
+			if (cur_full) {
+				bool match = (strcmp(target_full, cur_full) == 0);
+				free(cur_full);
+				if (match) {
+					free(target_full);
+					if (cur != openfile) {
+						openfile = cur;
+						redecorate_after_switch();
+					}
+					return TRUE;
+				}
+			}
+		}
+		cur = cur->next;
+	} while (cur != openfile);
+
+	free(target_full);
+#endif
+	return FALSE;
+}
+
 /* Remove the current buffer from the circular list of buffers. */
 void close_buffer(void)
 {

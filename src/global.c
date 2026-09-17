@@ -160,6 +160,7 @@ int sidebar = 0;
 		/* Becomes 1 when the indicator "scroll bar" must be shown. */
 #ifdef ENABLE_BROWSER
 bool explorer_visible = FALSE;
+bool custom_workspace_set = FALSE;
 char *explorer_path = NULL;
 char **explorer_items = NULL;
 size_t explorer_length = 0;

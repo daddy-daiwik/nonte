@@ -118,6 +118,7 @@ extern int margin;
 extern int sidebar;
 #ifdef ENABLE_BROWSER
 extern bool explorer_visible;
+extern bool custom_workspace_set;
 extern char *explorer_path;
 extern char **explorer_items;
 extern size_t explorer_length;
@@ -321,6 +322,7 @@ void prepare_for_display(void);
 void mention_name_and_linecount(void);
 void switch_to_prev_buffer(void);
 void switch_to_next_buffer(void);
+bool switch_to_buffer_if_open(const char *target_path);
 void redecorate_after_switch(void);
 void close_buffer(void);
 #endif
@@ -596,6 +598,8 @@ void complete_a_word(void);
 
 /* All functions in utils.c. */
 void get_homedir(void);
+char *shell_escape(const char *str);
+char *get_workspace_dir(void);
 const char *tail(const char *path);
 char *concatenate(const char *path, const char *name);
 int digits(ssize_t n);

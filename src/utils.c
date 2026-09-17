@@ -528,3 +528,127 @@ size_t number_of_characters_in(const linestruct *begin, const linestruct *end)
 	/* Do not count the final newline. */
 	return (count - 1);
 }
+
+/* Escape a string safely for execution in POSIX shell command strings.
+ * Wraps in single quotes and replaces each single quote with '\''.
+ * Returns a dynamically allocated string (caller must free). */
+char *shell_escape(const char *str)
+{
+	if (str == NULL)
+		return copy_of("''");
+
+	size_t len = strlen(str);
+	char *out = nmalloc(len * 4 + 3);
+	char *p = out;
+
+	*p++ = '\'';
+	for (size_t i = 0; i < len; i++) {
+		if (str[i] == '\'') {
+			*p++ = '\'';
+			*p++ = '\\';
+			*p++ = '\'';
+			*p++ = '\'';
+		} else {
+			*p++ = str[i];
+		}
+	}
+	*p++ = '\'';
+	*p = '\0';
+
+	return out;
+}
+
+/* Find the root workspace directory for the currently open file or working directory.
+ * Returns a dynamically allocated string (caller must free). */
+char *get_workspace_dir(void)
+{
+#ifdef ENABLE_BROWSER
+	/* 1. If the user explicitly chose a workspace directory, respect it. */
+	if (custom_workspace_set && explorer_path && explorer_path[0]) {
+		char *ws = copy_of(explorer_path);
+		size_t len = strlen(ws);
+		while (len > 1 && ws[len - 1] == '/')
+			ws[--len] = '\0';
+		return ws;
+	}
+#endif
+
+	/* 2. Determine base directory to search upwards from. */
+	char base[PATH_MAX] = "";
+
+	if (openfile && openfile->filename && openfile->filename[0] != '\0') {
+		char *full = get_full_path(openfile->filename);
+		if (full) {
+			snprintf(base, sizeof(base), "%s", full);
+			free(full);
+			char *slash = strrchr(base, '/');
+			if (slash == base)
+				*(slash + 1) = '\0';
+			else if (slash)
+				*slash = '\0';
+		}
+	}
+
+	if (base[0] == '\0') {
+		if (getcwd(base, sizeof(base)) == NULL)
+			snprintf(base, sizeof(base), ".");
+	}
+
+	char *real_base = realpath(base, NULL);
+	if (real_base) {
+		snprintf(base, sizeof(base), "%s", real_base);
+		free(real_base);
+	}
+
+	/* 3. Walk upwards looking for root markers. */
+	get_homedir();
+	const char *home = homedir ? homedir : "";
+
+	char cur[PATH_MAX];
+	snprintf(cur, sizeof(cur), "%s", base);
+
+	const char *vc_markers[] = { ".git", ".hg", ".svn" };
+	const char *proj_markers[] = {
+		"package.json", "Cargo.toml", "go.mod", "Makefile",
+		"CMakeLists.txt", "meson.build", "pyproject.toml", ".project"
+	};
+
+	/* First pass: search upwards for VCS root */
+	while (cur[0] != '\0' && strcmp(cur, "/") != 0) {
+		if (strcmp(cur, home) == 0 && strcmp(base, home) != 0)
+			break;
+
+		for (size_t i = 0; i < sizeof(vc_markers) / sizeof(vc_markers[0]); i++) {
+			char check[PATH_MAX + 64];
+			snprintf(check, sizeof(check), "%s/%s", cur, vc_markers[i]);
+			if (access(check, F_OK) == 0)
+				return copy_of(cur);
+		}
+
+		char *slash = strrchr(cur, '/');
+		if (!slash || slash == cur)
+			break;
+		*slash = '\0';
+	}
+
+	/* Second pass: search upwards for project markers */
+	snprintf(cur, sizeof(cur), "%s", base);
+	while (cur[0] != '\0' && strcmp(cur, "/") != 0) {
+		if (strcmp(cur, home) == 0 && strcmp(base, home) != 0)
+			break;
+
+		for (size_t i = 0; i < sizeof(proj_markers) / sizeof(proj_markers[0]); i++) {
+			char check[PATH_MAX + 64];
+			snprintf(check, sizeof(check), "%s/%s", cur, proj_markers[i]);
+			if (access(check, F_OK) == 0)
+				return copy_of(cur);
+		}
+
+		char *slash = strrchr(cur, '/');
+		if (!slash || slash == cur)
+			break;
+		*slash = '\0';
+	}
+
+	return copy_of(base);
+}

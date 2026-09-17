@@ -1087,13 +1087,41 @@ void do_command_palette(void)
 /* Feature 5: Quick open file by name (Ctrl+P). */
 void do_quick_open(void)
 {
-	char *files[512];
+	int max_files = 4096;
+	char **files = nmalloc(max_files * sizeof(char *));
 	int file_count = 0;
 
-	FILE *fp = popen("find . -maxdepth 5 -not -path '*/.*' -type f 2>/dev/null", "r");
+	char *ws_dir = get_workspace_dir();
+	char ws_name[64];
+	snprintf(ws_name, sizeof(ws_name), "%s", tail(ws_dir));
+
+	char git_check[PATH_MAX];
+	snprintf(git_check, sizeof(git_check), "%s/.git", ws_dir);
+	bool is_git = (access(git_check, F_OK) == 0);
+
+	static int rg_avail = -1;
+	if (rg_avail == -1)
+		rg_avail = (system("command -v rg >/dev/null 2>&1") == 0);
+
+	char *qws = shell_escape(ws_dir);
+	char cmd[1024];
+
+	if (is_git) {
+		snprintf(cmd, sizeof(cmd),
+			"(cd %s && git ls-files -co --exclude-standard 2>/dev/null)", qws);
+	} else if (rg_avail) {
+		snprintf(cmd, sizeof(cmd),
+			"(cd %s && rg --files --hidden -g '!.git' -g '!node_modules' 2>/dev/null)", qws);
+	} else {
+		snprintf(cmd, sizeof(cmd),
+			"(cd %s && find . -maxdepth 5 -not -path '*/.*' -not -path '*/node_modules/*' -not -path '*/target/*' -not -path '*/build/*' -type f 2>/dev/null)", qws);
+	}
+	free(qws);
+
+	FILE *fp = popen(cmd, "r");
 	if (fp != NULL) {
-		char linebuf[512];
-		while (file_count < 500 && fgets(linebuf, sizeof(linebuf), fp)) {
+		char linebuf[PATH_MAX];
+		while (file_count < max_files && fgets(linebuf, sizeof(linebuf), fp)) {
 			size_t l = strlen(linebuf);
 			while (l > 0 && (linebuf[l - 1] == '\r' || linebuf[l - 1] == '\n'))
 				linebuf[--l] = '\0';
@@ -1107,7 +1135,9 @@ void do_quick_open(void)
 	}
 
 	if (file_count == 0) {
-		statusline(AHEM, _("No files found in workspace"));
+		statusline(AHEM, _("No files found in workspace [%s]"), ws_name);
+		free(files);
+		free(ws_dir);
 		return;
 	}
 
@@ -1124,6 +1154,8 @@ void do_quick_open(void)
 	if (palwin == NULL) {
 		for (int i = 0; i < file_count; i++)
 			free(files[i]);
+		free(files);
+		free(ws_dir);
 		return;
 	}
 
@@ -1135,9 +1167,9 @@ void do_quick_open(void)
 	int selected_idx = 0;
 	int scroll_offset = 0;
 	char *chosen_file = NULL;
+	int *matches = nmalloc(max_files * sizeof(int));
 
 	while (TRUE) {
-		int matches[512];
 		int match_count = 0;
 
 		for (int i = 0; i < file_count; i++) {
@@ -1159,7 +1191,7 @@ void do_quick_open(void)
 		box(palwin, 0, 0);
 
 		wattron(palwin, A_BOLD);
-		mvwprintw(palwin, 0, 2, " Quick Open File (Ctrl+P) ");
+		mvwprintw(palwin, 0, 2, " Quick Open File (Ctrl+P) [%s] ", ws_name);
 		mvwprintw(palwin, 1, 2, "> %s", query);
 		wattroff(palwin, A_BOLD);
 
@@ -1242,15 +1274,26 @@ void do_quick_open(void)
 
 	for (int i = 0; i < file_count; i++)
 		free(files[i]);
+	free(files);
+	free(matches);
 
 	delwin(palwin);
 	full_refresh();
 	edit_refresh();
 
 	if (chosen_file) {
-		open_buffer(chosen_file, TRUE);
+		char target_path[PATH_MAX];
+		if (chosen_file[0] == '/')
+			snprintf(target_path, sizeof(target_path), "%s", chosen_file);
+		else
+			snprintf(target_path, sizeof(target_path), "%s/%s", ws_dir, chosen_file);
+
+		if (!switch_to_buffer_if_open(target_path))
+			open_buffer(target_path, TRUE);
+
 		free(chosen_file);
 	}
+	free(ws_dir);
 }
 
 typedef struct GrepMatch {
@@ -1278,17 +1321,27 @@ void do_find_in_files(void)
 	keypad(palwin, TRUE);
 	wtimeout(palwin, -1);
 
+	char *ws_dir = get_workspace_dir();
+	char ws_name[64];
+	snprintf(ws_name, sizeof(ws_name), "%s", tail(ws_dir));
+
 	char query[128] = "";
 	int query_len = 0;
 	int selected_idx = 0;
 	int scroll_offset = 0;
 
-	GrepMatch matches[200];
+	GrepMatch matches[300];
 	int match_count = 0;
+	int max_matches = 300;
 	char last_searched[128] = "";
+	bool search_pending = FALSE;
+
+	static int has_rg = -1;
+	if (has_rg == -1)
+		has_rg = (system("command -v rg >/dev/null 2>&1") == 0);
 
 	while (TRUE) {
-		if (strcmp(query, last_searched) != 0) {
+		if (search_pending) {
 			for (int i = 0; i < match_count; i++) {
 				free(matches[i].filepath);
 				free(matches[i].content);
@@ -1297,14 +1350,30 @@ void do_find_in_files(void)
 			selected_idx = 0;
 			scroll_offset = 0;
 			snprintf(last_searched, sizeof(last_searched), "%s", query);
+			search_pending = FALSE;
+			wtimeout(palwin, -1);
 
 			if (query_len >= 2) {
-				char cmd[512];
-				snprintf(cmd, sizeof(cmd), "grep -rn -I --exclude-dir=.git --exclude-dir=node_modules -m 150 -e \"%s\" . 2>/dev/null", query);
+				char *qws = shell_escape(ws_dir);
+				char *qquery = shell_escape(query);
+				char cmd[2048];
+
+				if (has_rg) {
+					snprintf(cmd, sizeof(cmd),
+						"(cd %s && rg -n --no-heading --max-count 300 --color never -F -e %s . 2>/dev/null)",
+						qws, qquery);
+				} else {
+					snprintf(cmd, sizeof(cmd),
+						"(cd %s && grep -rn -I -F --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.cache --exclude-dir=build --exclude-dir=dist -m 300 -e %s . 2>/dev/null)",
+						qws, qquery);
+				}
+				free(qws);
+				free(qquery);
+
 				FILE *fp = popen(cmd, "r");
 				if (fp != NULL) {
-					char linebuf[512];
-					while (match_count < 150 && fgets(linebuf, sizeof(linebuf), fp)) {
+					char linebuf[1024];
+					while (match_count < max_matches && fgets(linebuf, sizeof(linebuf), fp)) {
 						size_t l = strlen(linebuf);
 						while (l > 0 && (linebuf[l - 1] == '\r' || linebuf[l - 1] == '\n'))
 							linebuf[--l] = '\0';
@@ -1348,7 +1417,7 @@ void do_find_in_files(void)
 		box(palwin, 0, 0);
 
 		wattron(palwin, A_BOLD);
-		mvwprintw(palwin, 0, 2, " Find in Files (Ctrl+Shift+F) ");
+		mvwprintw(palwin, 0, 2, " Find in Files (Ctrl+Shift+F) [%s] ", ws_name);
 		mvwprintw(palwin, 1, 2, "> %s", query);
 		wattroff(palwin, A_BOLD);
 
@@ -1385,6 +1454,8 @@ void do_find_in_files(void)
 					selected_idx + 1, match_count);
 		else if (query_len < 2)
 			mvwprintw(palwin, pheight - 1, 2, " Type at least 2 chars to search [Esc: Close] ");
+		else if (search_pending)
+			mvwprintw(palwin, pheight - 1, 2, " Searching... ");
 		else
 			mvwprintw(palwin, pheight - 1, 2, " No matches found [Esc: Close] ");
 
@@ -1392,11 +1463,77 @@ void do_find_in_files(void)
 
 		int ch = wgetch(palwin);
 
+		if (ch == ERR) {
+			continue;
+		}
+
 		if (ch == 27 || ch == 3 || ch == 7) {
 			break;
 		} else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+			if (search_pending) {
+				search_pending = FALSE;
+				wtimeout(palwin, -1);
+				for (int i = 0; i < match_count; i++) {
+					free(matches[i].filepath);
+					free(matches[i].content);
+				}
+				match_count = 0;
+				selected_idx = 0;
+				scroll_offset = 0;
+				snprintf(last_searched, sizeof(last_searched), "%s", query);
+
+				if (query_len >= 2) {
+					char *qws = shell_escape(ws_dir);
+					char *qquery = shell_escape(query);
+					char cmd[2048];
+
+					if (has_rg) {
+						snprintf(cmd, sizeof(cmd),
+							"(cd %s && rg -n --no-heading --max-count 300 --color never -F -e %s . 2>/dev/null)",
+							qws, qquery);
+					} else {
+						snprintf(cmd, sizeof(cmd),
+							"(cd %s && grep -rn -I -F --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.cache --exclude-dir=build --exclude-dir=dist -m 300 -e %s . 2>/dev/null)",
+							qws, qquery);
+					}
+					free(qws);
+					free(qquery);
+
+					FILE *fp = popen(cmd, "r");
+					if (fp != NULL) {
+						char linebuf[1024];
+						while (match_count < max_matches && fgets(linebuf, sizeof(linebuf), fp)) {
+							size_t l = strlen(linebuf);
+							while (l > 0 && (linebuf[l - 1] == '\r' || linebuf[l - 1] == '\n'))
+								linebuf[--l] = '\0';
+							char *fstart = linebuf;
+							if (fstart[0] == '.' && fstart[1] == '/')
+								fstart += 2;
+							char *colon1 = strchr(fstart, ':');
+							if (!colon1)
+								continue;
+							*colon1 = '\0';
+							char *lstart = colon1 + 1;
+							char *colon2 = strchr(lstart, ':');
+							if (!colon2)
+								continue;
+							*colon2 = '\0';
+							char *text = colon2 + 1;
+							while (*text == ' ' || *text == '\t')
+								text++;
+
+							matches[match_count].filepath = copy_of(fstart);
+							matches[match_count].lineno = atol(lstart);
+							matches[match_count].content = copy_of(text);
+							match_count++;
+						}
+						pclose(fp);
+					}
+				}
+			}
+
 			if (match_count > 0) {
-				char *fp_copy = copy_of(matches[selected_idx].filepath);
+				char *fp_rel = copy_of(matches[selected_idx].filepath);
 				ssize_t target_line = matches[selected_idx].lineno;
 				for (int i = 0; i < match_count; i++) {
 					free(matches[i].filepath);
@@ -1405,10 +1542,20 @@ void do_find_in_files(void)
 				delwin(palwin);
 				full_refresh();
 				edit_refresh();
-				open_buffer(fp_copy, TRUE);
+
+				char target_path[PATH_MAX];
+				if (fp_rel[0] == '/')
+					snprintf(target_path, sizeof(target_path), "%s", fp_rel);
+				else
+					snprintf(target_path, sizeof(target_path), "%s/%s", ws_dir, fp_rel);
+
+				if (!switch_to_buffer_if_open(target_path))
+					open_buffer(target_path, TRUE);
+
 				goto_line_posx(target_line, 0);
-				statusline(INFO, _("Jumped to %s:%zd"), fp_copy, target_line);
-				free(fp_copy);
+				statusline(INFO, _("Jumped to %s:%zd"), fp_rel, target_line);
+				free(fp_rel);
+				free(ws_dir);
 				return;
 			}
 			break;
@@ -1429,20 +1576,20 @@ void do_find_in_files(void)
 		} else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b' || ch == 8) {
 			if (query_len > 0) {
 				query[--query_len] = '\0';
-				selected_idx = 0;
-				scroll_offset = 0;
+				search_pending = TRUE;
+				wtimeout(palwin, 60);
 			}
 		} else if (ch == 21) {
 			query[0] = '\0';
 			query_len = 0;
-			selected_idx = 0;
-			scroll_offset = 0;
+			search_pending = TRUE;
+			wtimeout(palwin, 60);
 		} else if (ch >= 0x20 && ch <= 0x7E) {
 			if (query_len < (int)sizeof(query) - 2) {
 				query[query_len++] = (char)ch;
 				query[query_len] = '\0';
-				selected_idx = 0;
-				scroll_offset = 0;
+				search_pending = TRUE;
+				wtimeout(palwin, 60);
 			}
 		}
 	}
@@ -1455,4 +1602,5 @@ void do_find_in_files(void)
 	delwin(palwin);
 	full_refresh();
 	edit_refresh();
+	free(ws_dir);
 }
