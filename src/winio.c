@@ -61,8 +61,8 @@ static int countdown = 0;
 
 /* Split view state */
 bool split_view_active = FALSE;
+openfilestruct *split_file = NULL;
 linestruct *split_edittop = NULL;
-openfilestruct *split_edittop_file = NULL;
 static size_t from_x = 0;
 		/* From where in the relevant line the current row is drawn. */
 static size_t till_x = 0;
@@ -1768,13 +1768,31 @@ int get_mouseinput(int *mouse_y, int *mouse_x)
 			wmouse_trafo(footwin, mouse_y, mouse_x, FALSE);
 
 		if (in_middle || (in_footer && *mouse_y == 0)) {
-			int keycode = (event.bstate & BUTTON4_PRESSED) ? ALT_UP : ALT_DOWN;
+			int split_x = margin + explorer_cols + editwincols;
 
-			/* One bump of the mouse wheel should scroll two lines. */
-			put_back(keycode);
-			put_back(keycode);
+			if (split_view_active && in_middle && event.x > split_x) {
+				/* Mouse wheel over duplicate/split view pane: scroll split view independently! */
+				if (event.bstate & BUTTON4_PRESSED) {
+					for (int i = 0; i < 2 && split_edittop && split_edittop->prev; i++)
+						split_edittop = split_edittop->prev;
+				} else {
+					for (int i = 0; i < 2 && split_edittop && split_edittop->next; i++)
+						split_edittop = split_edittop->next;
+				}
+				refresh_needed = TRUE;
+				return 2;
+			}
 
-			return 1;
+			/* Mouse wheel over main edit window: scroll viewport without rearranging lines! */
+			if (event.bstate & BUTTON4_PRESSED) {
+				do_scroll_up();
+				do_scroll_up();
+			} else {
+				do_scroll_down();
+				do_scroll_down();
+			}
+			refresh_needed = TRUE;
+			return 2;
 		} else
 			/* Ignore "presses" of the fourth and fifth mouse buttons
 			 * that aren't on the edit window or the status bar. */
@@ -3572,16 +3590,40 @@ void edit_refresh(void)
 				mvwaddch(midwin, r, split_x, ACS_VLINE);
 			}
 
-			if (!split_edittop || split_edittop_file != openfile) {
-				split_edittop = openfile->edittop;
-				split_edittop_file = openfile;
+			/* Ensure split_file is valid and still in the open buffers list */
+			bool split_file_valid = FALSE;
+			if (split_file != NULL) {
+				openfilestruct *check = openfile;
+				do {
+					if (check == split_file) {
+						split_file_valid = TRUE;
+						break;
+					}
+					check = check->next;
+				} while (check != openfile && check != NULL);
 			}
+
+			if (!split_file_valid) {
+				split_file = openfile;
+				split_edittop = openfile->edittop;
+			}
+
+			/* Ensure split_edittop points to a valid line within split_file */
+			bool edittop_valid = FALSE;
+			for (linestruct *l = split_file->filetop; l != NULL; l = l->next) {
+				if (l == split_edittop) {
+					edittop_valid = TRUE;
+					break;
+				}
+			}
+			if (!edittop_valid)
+				split_edittop = split_file->edittop ? split_file->edittop : split_file->filetop;
 
 			char hdr[128];
 			snprintf(hdr, sizeof(hdr), " %s (View) [L%zd/%zd] ",
-				(openfile->filename && *openfile->filename) ? tail(openfile->filename) : "[No Name]",
+				(split_file->filename && *split_file->filename) ? tail(split_file->filename) : "[No Name]",
 				split_edittop ? split_edittop->lineno : 1,
-				openfile->filebot ? openfile->filebot->lineno : 1);
+				split_file->filebot ? split_file->filebot->lineno : 1);
 
 			wattron(midwin, A_REVERSE | A_BOLD);
 			mvwprintw(midwin, 0, split_x + 1, "%-*.*s", right_w, right_w, hdr);
@@ -4041,13 +4083,13 @@ void toggle_split_view(void)
 		editwincols = (COLS - margin - sidebar - explorer_cols) / 2 - 1;
 		if (editwincols < 10)
 			editwincols = 10;
+		split_file = openfile;
 		split_edittop = openfile->edittop;
-		split_edittop_file = openfile;
-		statusline(INFO, _("Split view active (showing current file)"));
+		statusline(INFO, _("Split view active (Ctrl+\\ to close)"));
 	} else {
 		editwincols = COLS - margin - sidebar - explorer_cols;
+		split_file = NULL;
 		split_edittop = NULL;
-		split_edittop_file = NULL;
 		statusline(INFO, _("Split view closed"));
 	}
 	refresh_needed = TRUE;
@@ -4073,10 +4115,12 @@ void split_scroll_down(void)
 
 void split_sync(void)
 {
-	if (!split_view_active)
+	if (!split_view_active || !split_file)
 		return;
-	split_edittop = openfile->edittop;
-	split_edittop_file = openfile;
+	if (split_file == openfile)
+		split_edittop = openfile->edittop;
+	else
+		split_edittop = split_file->filetop;
 	refresh_needed = TRUE;
 }
 

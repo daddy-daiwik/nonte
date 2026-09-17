@@ -701,6 +701,8 @@ void spotlight_softwrapped(size_t from_col, size_t to_col);
 void do_credits(void);
 #endif
 extern bool split_view_active;
+extern openfilestruct *split_file;
+extern linestruct *split_edittop;
 void toggle_split_view(void);
 void split_scroll_up(void);
 void split_scroll_down(void);

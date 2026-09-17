@@ -1374,6 +1374,9 @@ int process_click(void)
 
 	/* If the click was in the edit window, put the cursor in that spot. */
 	if (wmouse_trafo(midwin, &click_row, &click_col, FALSE)) {
+		if (split_view_active && click_col > editwincols)
+			return 2;
+
 		if (click_col < 0)
 			click_col = 0;
 		if (click_col >= editwincols)
