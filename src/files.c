@@ -475,7 +475,9 @@ bool open_buffer(const char *filename, bool new_one)
 
 	/* For a new buffer, store filename and put cursor at start of buffer. */
 	if (descriptor >= 0 && new_one) {
-		openfile->filename = mallocstrcpy(openfile->filename, realname);
+		char *full = get_full_path(realname);
+		openfile->filename = mallocstrcpy(openfile->filename, full ? full : realname);
+		free(full);
 		openfile->current = openfile->filetop;
 		openfile->current_x = 0;
 		openfile->placewewant = 0;
@@ -485,6 +487,25 @@ bool open_buffer(const char *filename, bool new_one)
 	/* If a new buffer was opened, check whether a syntax can be applied. */
 	if (new_one)
 		find_and_prime_applicable_syntax();
+#endif
+
+#ifdef ENABLE_BROWSER
+	if (!custom_workspace_set && *filename) {
+		char *ws = get_workspace_dir();
+		if (ws) {
+			if (chdir(ws) == 0) {
+				explorer_path = free_and_assign(explorer_path, ws);
+				if (explorer_path[strlen(explorer_path) - 1] != '/') {
+					char *slashed = nmalloc(strlen(explorer_path) + 2);
+					sprintf(slashed, "%s/", explorer_path);
+					free(explorer_path);
+					explorer_path = slashed;
+				}
+			} else {
+				free(ws);
+			}
+		}
+	}
 #endif
 
 	free(realname);
@@ -580,6 +601,27 @@ void redecorate_after_switch(void)
 		openfile->errormessage = NULL;
 	} else
 		mention_name_and_linecount();
+
+#ifdef ENABLE_BROWSER
+	if (!custom_workspace_set && openfile && openfile->filename && openfile->filename[0]) {
+		char *ws = get_workspace_dir();
+		if (ws) {
+			if (chdir(ws) == 0) {
+				explorer_path = free_and_assign(explorer_path, ws);
+				if (explorer_path[strlen(explorer_path) - 1] != '/') {
+					char *slashed = nmalloc(strlen(explorer_path) + 2);
+					sprintf(slashed, "%s/", explorer_path);
+					free(explorer_path);
+					explorer_path = slashed;
+				}
+				if (explorer_visible)
+					explorer_read_directory();
+			} else {
+				free(ws);
+			}
+		}
+	}
+#endif
 }
 
 /* Switch to the previous entry in the circular list of buffers. */
@@ -2018,7 +2060,9 @@ bool write_file(const char *name, FILE *thefile, writing_type method, bool annot
 			if (ISSET(LOCKING))
 				openfile->lock_filename = do_lockfile(realname, FALSE);
 #endif
-			openfile->filename = mallocstrcpy(openfile->filename, realname);
+			char *full = get_full_path(realname);
+			openfile->filename = mallocstrcpy(openfile->filename, full ? full : realname);
+			free(full);
 #ifdef ENABLE_COLOR
 			syntaxtype *was_syntax = openfile->syntax;
 

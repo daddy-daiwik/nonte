@@ -235,6 +235,7 @@ void to_first_file(void);
 void to_last_file(void);
 void explorer_toggle(void);
 void do_workspace_select(void);
+void explorer_read_directory(void);
 bool explorer_handle_input(int input);
 void explorer_refresh(void);
 #endif

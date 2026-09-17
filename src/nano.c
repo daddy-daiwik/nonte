@@ -2857,6 +2857,24 @@ int main(int argc, char **argv)
 	if (optind < argc)
 		die(_("Can open just one file\n"));
 #endif
+#ifdef ENABLE_BROWSER
+	if (openfile && openfile->filename && openfile->filename[0]) {
+		char *ws = get_workspace_dir();
+		if (ws) {
+			if (chdir(ws) == 0) {
+				explorer_path = free_and_assign(explorer_path, ws);
+				if (explorer_path[strlen(explorer_path) - 1] != '/') {
+					char *slashed = nmalloc(strlen(explorer_path) + 2);
+					sprintf(slashed, "%s/", explorer_path);
+					free(explorer_path);
+					explorer_path = slashed;
+				}
+			} else {
+				free(ws);
+			}
+		}
+	}
+#endif
 
 	prepare_for_display();
 
