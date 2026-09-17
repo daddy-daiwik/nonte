@@ -1173,6 +1173,12 @@ void shortcut_init(void)
 			N_("Next Occurrence"), N_("Select word or jump to next occurrence"), TOGETHER);
 	add_to_funcs(toggle_split_view, MMAIN,
 			N_("Toggle Split View"), N_("Toggle side-by-side split view"), TOGETHER);
+	add_to_funcs(split_scroll_up, MMAIN,
+			N_("Split View: Scroll Up"), N_("Scroll split preview pane up"), TOGETHER);
+	add_to_funcs(split_scroll_down, MMAIN,
+			N_("Split View: Scroll Down"), N_("Scroll split preview pane down"), TOGETHER);
+	add_to_funcs(split_sync, MMAIN,
+			N_("Split View: Sync with Cursor"), N_("Align split preview pane with current line"), TOGETHER);
 #ifdef ENABLE_BROWSER
 	add_to_funcs(explorer_toggle, MMAIN,
 			N_("Toggle Explorer"), N_("Show or hide the file sidebar"), TOGETHER);
@@ -1332,6 +1338,8 @@ void shortcut_init(void)
 	add_to_sclist(MMAIN, "C-Backslash", CONTROL_BACKSLASH, toggle_split_view);
 	add_to_sclist(MMAIN, "^\\", 0x1C, toggle_split_view);
 	add_to_sclist(MMAIN, "M-\\", 0, toggle_split_view);
+	add_to_sclist(MMAIN, "M-{", 0, split_scroll_up);
+	add_to_sclist(MMAIN, "M-}", 0, split_scroll_down);
 	add_to_sclist(MMAIN, "^_", 0x1F, do_comment);
 	add_to_sclist(MMAIN, "^/", 0x1F, do_comment);
 	add_to_sclist(MMAIN, "M-/", 0, do_comment);

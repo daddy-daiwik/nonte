@@ -3605,7 +3605,9 @@ void do_move_line_down(void)
 /* Feature 3: Duplicate current line or selection (Shift+Alt+Down / Ctrl+Shift+D). */
 void do_duplicate_line(void)
 {
-	linestruct *top, *bot, *curr, *after_bot, *insert_pt;
+	linestruct *top, *bot;
+	size_t was_x = openfile->current_x;
+	ssize_t was_lineno = openfile->current->lineno;
 
 	if (ISSET(VIEW_MODE)) {
 		print_view_warning();
@@ -3613,26 +3615,65 @@ void do_duplicate_line(void)
 	}
 
 	get_range(&top, &bot);
-	after_bot = bot->next;
-	insert_pt = bot;
 
-	for (curr = top; curr != bot->next; curr = curr->next) {
-		linestruct *clone = make_new_node(insert_pt);
-		clone->data = copy_of(curr->data);
-		insert_pt->next = clone;
-		insert_pt = clone;
+	/* Build a copy of the lines to duplicate.
+	 * In nano's cutbuffer format for lines, each line is followed by the next,
+	 * and ends with an empty line node representing the newline. */
+	linestruct *dupe_buffer = NULL;
+	linestruct *dupe_tail = NULL;
+	size_t count = 0;
+
+	for (linestruct *curr = top; ; curr = curr->next) {
+		linestruct *item = make_new_node(dupe_tail);
+		item->data = copy_of(curr->data);
+		if (!dupe_buffer)
+			dupe_buffer = item;
+		else
+			dupe_tail->next = item;
+		dupe_tail = item;
+		count++;
+		if (curr == bot)
+			break;
 	}
 
-	insert_pt->next = after_bot;
-	if (after_bot != NULL)
-		after_bot->prev = insert_pt;
-	else
-		openfile->filebot = insert_pt;
+	linestruct *end_node = make_new_node(dupe_tail);
+	end_node->data = copy_of("");
+	dupe_tail->next = end_node;
 
-	if (!openfile->mark)
-		openfile->current = bot->next;
+	/* If at EOF and no trailing newline, ensure a magicline exists so we can insert below bot. */
+	if (bot->next == NULL)
+		new_magicline();
 
-	renumber_from(bot);
+	/* Place cursor at start of line below bot. */
+	openfile->current = bot->next;
+	openfile->current_x = 0;
+
+#ifndef NANO_TINY
+	/* Set up undo item using PASTE action with our dupe_buffer.
+	 * We temporarily redirect cutbuffer so add_undo stores the dupe_buffer
+	 * into the undo stack without clobbering the user's actual clipboard. */
+	linestruct *saved_cutbuffer = cutbuffer;
+	cutbuffer = dupe_buffer;
+	add_undo(PASTE, NULL);
+	cutbuffer = saved_cutbuffer;
+#endif
+
+	/* Graft the duplicated buffer into the document. */
+	copy_from_buffer(dupe_buffer);
+
+#ifndef NANO_TINY
+	update_undo(PASTE);
+#endif
+
+	free_lines(dupe_buffer);
+
+	/* Position cursor on the first duplicated line at original column. */
+	ssize_t target_lineno = was_lineno + count;
+	openfile->mark = NULL;
+	openfile->softmark = FALSE;
+	goto_line_posx(target_lineno, was_x);
+	openfile->placewewant = xplustabs();
+
 	set_modified();
 	refresh_needed = TRUE;
 }

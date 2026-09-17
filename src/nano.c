@@ -1081,6 +1081,11 @@ void regenerate_screen(void)
 	bardata = nrealloc(bardata, LINES * sizeof(int));
 
 	editwincols = COLS - margin - sidebar - explorer_cols;
+	if (split_view_active) {
+		editwincols = editwincols / 2 - 1;
+		if (editwincols < 10)
+			editwincols = 10;
+	}
 
 	/* Put the terminal in the desired state again, and
 	 * recreate the subwindows with their (new) sizes. */
@@ -1293,6 +1298,11 @@ void confirm_margin(void)
 
 		margin = needed_margin;
 		editwincols = COLS - margin - sidebar - explorer_cols;
+		if (split_view_active) {
+			editwincols = editwincols / 2 - 1;
+			if (editwincols < 10)
+				editwincols = 10;
+		}
 
 #ifndef NANO_TINY
 		/* Ensure a proper starting column for the first screen row. */
@@ -2682,6 +2692,14 @@ int main(int argc, char **argv)
 	/* Tell ncurses to transform bracketed-paste sequences into keycodes. */
 	define_key("\e[200~", START_OF_PASTE);
 	define_key("\e[201~", END_OF_PASTE);
+	define_key("\e[1;4A", SHIFT_ALT_UP);
+	define_key("\e[1;4B", SHIFT_ALT_DOWN);
+	define_key("\e[68;6u", CONTROL_SHIFT_D);
+	define_key("\e[100;6u", CONTROL_SHIFT_D);
+	define_key("\e[80;6u", CONTROL_SHIFT_P);
+	define_key("\e[112;6u", CONTROL_SHIFT_P);
+	define_key("\e[70;6u", CONTROL_SHIFT_F);
+	define_key("\e[102;6u", CONTROL_SHIFT_F);
 #endif
 #endif
 	mousefocusin = get_keycode("kxIN", FOCUS_IN);

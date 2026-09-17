@@ -58,6 +58,11 @@ static bool linger_after_escape = FALSE;
 		/* Whether to give ncurses some time to get the next code. */
 static int countdown = 0;
 		/* The number of keystrokes left before we blank the status bar. */
+
+/* Split view state */
+bool split_view_active = FALSE;
+linestruct *split_edittop = NULL;
+openfilestruct *split_edittop_file = NULL;
 static size_t from_x = 0;
 		/* From where in the relevant line the current row is drawn. */
 static size_t till_x = 0;
@@ -682,9 +687,9 @@ int convert_CSI_sequence(const int *seq, size_t length, int *consumed)
 						 * act as if they are Home/End/PgUp/PgDown with Shift. */
 						switch (seq[3]) {
 							case 'A': /* Esc [ 1 ; 4 A == Shift-Alt-Up on xterm. */
-								return SHIFT_PAGEUP;
+								return SHIFT_ALT_UP;
 							case 'B': /* Esc [ 1 ; 4 B == Shift-Alt-Down on xterm. */
-								return SHIFT_PAGEDOWN;
+								return SHIFT_ALT_DOWN;
 							case 'C': /* Esc [ 1 ; 4 C == Shift-Alt-Right on xterm. */
 								return SHIFT_END;
 							case 'D': /* Esc [ 1 ; 4 D == Shift-Alt-Left on xterm. */
@@ -3559,29 +3564,42 @@ void edit_refresh(void)
 	/* Feature 7: Split View rendering */
 	if (split_view_active) {
 		int split_x = margin + explorer_cols + editwincols;
-		openfilestruct *other = (openfile->next != openfile) ? openfile->next : openfile;
-		linestruct *other_line = other->filetop;
-		int r = 0;
-		for (r = 0; r < editwinrows; r++) {
-			mvwaddch(midwin, r, split_x, ACS_VLINE);
-		}
-		char hdr[64];
-		snprintf(hdr, sizeof(hdr), " %s%s ", (other->filename && *other->filename) ? tail(other->filename) : "[No Name]", other->modified ? " *" : "");
-		wattron(midwin, A_REVERSE | A_BOLD);
-		mvwprintw(midwin, 0, split_x + 1, "%-*.*s", COLS - split_x - 1, COLS - split_x - 1, hdr);
-		wattroff(midwin, A_REVERSE | A_BOLD);
+		int right_w = COLS - split_x - 1;
 
-		r = 1;
-		while (r < editwinrows && other_line) {
-			char *disp = display_string(other_line->data, 0, COLS - split_x - 2, TRUE, FALSE);
-			mvwprintw(midwin, r, split_x + 1, "%-*.*s", COLS - split_x - 1, COLS - split_x - 1, disp);
-			free(disp);
-			other_line = other_line->next;
-			r++;
-		}
-		while (r < editwinrows) {
-			mvwprintw(midwin, r, split_x + 1, "%*s", COLS - split_x - 1, " ");
-			r++;
+		if (right_w > 2) {
+			int r;
+			for (r = 0; r < editwinrows; r++) {
+				mvwaddch(midwin, r, split_x, ACS_VLINE);
+			}
+
+			if (!split_edittop || split_edittop_file != openfile) {
+				split_edittop = openfile->edittop;
+				split_edittop_file = openfile;
+			}
+
+			char hdr[128];
+			snprintf(hdr, sizeof(hdr), " %s (View) [L%zd/%zd] ",
+				(openfile->filename && *openfile->filename) ? tail(openfile->filename) : "[No Name]",
+				split_edittop ? split_edittop->lineno : 1,
+				openfile->filebot ? openfile->filebot->lineno : 1);
+
+			wattron(midwin, A_REVERSE | A_BOLD);
+			mvwprintw(midwin, 0, split_x + 1, "%-*.*s", right_w, right_w, hdr);
+			wattroff(midwin, A_REVERSE | A_BOLD);
+
+			linestruct *other_line = split_edittop;
+			r = 1;
+			while (r < editwinrows && other_line) {
+				char *disp = display_string(other_line->data, 0, right_w - 1, TRUE, FALSE);
+				mvwprintw(midwin, r, split_x + 1, "%-*.*s", right_w, right_w, disp);
+				free(disp);
+				other_line = other_line->next;
+				r++;
+			}
+			while (r < editwinrows) {
+				mvwprintw(midwin, r, split_x + 1, "%*s", right_w, " ");
+				r++;
+			}
 		}
 	}
 
@@ -4016,8 +4034,6 @@ void find_bracket_match(linestruct *line, size_t x, linestruct **out_line, size_
 }
 
 /* Feature 7: Split View toggle (Ctrl+\). */
-bool split_view_active = FALSE;
-
 void toggle_split_view(void)
 {
 	split_view_active = !split_view_active;
@@ -4025,11 +4041,42 @@ void toggle_split_view(void)
 		editwincols = (COLS - margin - sidebar - explorer_cols) / 2 - 1;
 		if (editwincols < 10)
 			editwincols = 10;
-		statusline(INFO, _("Split view active (Ctrl+\\ to toggle)"));
+		split_edittop = openfile->edittop;
+		split_edittop_file = openfile;
+		statusline(INFO, _("Split view active (showing current file)"));
 	} else {
 		editwincols = COLS - margin - sidebar - explorer_cols;
+		split_edittop = NULL;
+		split_edittop_file = NULL;
 		statusline(INFO, _("Split view closed"));
 	}
+	refresh_needed = TRUE;
+}
+
+void split_scroll_up(void)
+{
+	if (!split_view_active || !split_edittop)
+		return;
+	for (int i = 0; i < 5 && split_edittop->prev; i++)
+		split_edittop = split_edittop->prev;
+	refresh_needed = TRUE;
+}
+
+void split_scroll_down(void)
+{
+	if (!split_view_active || !split_edittop)
+		return;
+	for (int i = 0; i < 5 && split_edittop->next; i++)
+		split_edittop = split_edittop->next;
+	refresh_needed = TRUE;
+}
+
+void split_sync(void)
+{
+	if (!split_view_active)
+		return;
+	split_edittop = openfile->edittop;
+	split_edittop_file = openfile;
 	refresh_needed = TRUE;
 }
 

@@ -702,6 +702,9 @@ void do_credits(void);
 #endif
 extern bool split_view_active;
 void toggle_split_view(void);
+void split_scroll_up(void);
+void split_scroll_down(void);
+void split_sync(void);
 void git_gutter_update(void);
 char git_gutter_status(ssize_t lineno);
 void find_bracket_match(linestruct *line, size_t x, linestruct **out_line, size_t *out_x);
